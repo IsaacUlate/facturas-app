@@ -589,7 +589,7 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
     centered("PAQUETE", table_x + guide_w / 2, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
     centered("DESCRIPCIÓN", table_x + guide_w + desc_w / 2, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
     centered("PESO LB", table_x + guide_w + desc_w + weight_w / 2, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
-    centered("PRECIO\nLB", table_x + guide_w + desc_w + weight_w + price_w / 2, table_y + 7, size=7, font="Helvetica-Bold", color=colors.white)
+    centered("PRECIO\LB", table_x + guide_w + desc_w + weight_w + price_w / 2, table_y + 7, size=7, font="Helvetica-Bold", color=colors.white)
     centered("TOTAL", table_x + guide_w + desc_w + weight_w + price_w + total_w / 2, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
 
     row_y = table_y - 18
