@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Creador de Facturas ARVOX</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="container">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Sistema local</p>
+        <h1>Creador de Facturas ARVOX</h1>
+        <p class="subtitle">
+          Procesa la sección de pendientes del archivo, genera 1 factura por cliente
+          y calcula el total automáticamente.
+        </p>
+      </div>
+      <div class="badge">Backend Python + Frontend Web</div>
+    </header>
+
+    <section class="card grid-2">
+      <div>
+        <h2>1. Archivo</h2>
+        <label class="upload-box" for="fileInput">
+          <input id="fileInput" type="file" accept=".xlsx,.xls,.csv" />
+          <span id="fileLabel">Arrastra o selecciona tu archivo XLSX/CSV</span>
+        </label>
+
+        <button id="processBtn" class="primary">Procesar archivo</button>
+        <p id="statusText" class="muted">Esperando archivo…</p>
+      </div>
+
+      <div>
+        <h2>2. Configuración ARVOX</h2>
+
+        <div class="form-grid">
+          <label>
+            Empresa
+            <input id="companyName" value="ARVOX COURIER" />
+          </label>
+
+          <label>
+            SINPE
+            <input id="sinpeNumber" value="8415-2881" />
+          </label>
+
+          <label>
+            Moneda tarifa
+            <select id="currency">
+              <option value="USD" selected>USD</option>
+            </select>
+          </label>
+
+          <label>
+            Precio por defecto
+            <input id="defaultUnitPrice" type="number" step="0.01" value="0" />
+          </label>
+
+          <label>
+            Precio por libra (USD)
+            <input id="defaultPricePerLb" type="number" step="0.01" value="6" />
+          </label>
+
+          <label>
+            Tipo de cambio CRC
+            <input id="exchangeRate" type="number" step="1" value="490" />
+          </label>
+
+          <label>
+            Color ARVOX
+            <input id="accentColor" type="color" value="#8B2E00" />
+          </label>
+
+          <label>
+            Nombre inferior
+            <input id="footerText" value="Arián Alfaro" />
+          </label>
+        </div>
+
+        <div class="checks">
+          <label>
+            <input id="includeMiamiCode" type="checkbox" />
+            Incluir código MIA en vista previa
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <section class="summary-grid" id="summaryGrid"></section>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>Facturas generadas</h2>
+        <div class="actions">
+          <input id="searchInput" placeholder="Buscar por cliente o guía" />
+          <button id="downloadZipBtn" class="secondary" disabled>Descargar ZIP</button>
+        </div>
+      </div>
+
+      <div id="invoiceList" class="invoice-list empty">Aún no hay facturas.</div>
+    </section>
+
+    <section class="card">
+      <h2>Filas inválidas</h2>
+      <div id="invalidRows" class="empty">Sin filas inválidas.</div>
+    </section>
+
+    <section class="card">
+      <h2>Vista previa de filas</h2>
+      <div id="previewTable" class="table-wrap empty">No hay datos procesados.</div>
+    </section>
+  </div>
+
+  <dialog id="invoiceDialog">
+    <div class="dialog-content">
+      <div class="section-header">
+        <h2>Vista previa de factura</h2>
+        <button id="closeDialogBtn" class="ghost" type="button">Cerrar</button>
+      </div>
+      <div id="invoicePreview"></div>
+    </div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
