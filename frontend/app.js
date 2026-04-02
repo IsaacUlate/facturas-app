@@ -1,4 +1,4 @@
-const API_BASE = 'http://127.0.0.1:8000';
+const API_BASE = 'https://facturas-app-1.onrender.com';
 
 const ARVOX_DEFAULTS = {
   companyName: 'ARVOX COURIER',
