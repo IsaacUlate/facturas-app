@@ -378,15 +378,18 @@ def get_effective_weight_lb(row: ParsedRow) -> Optional[float]:
 def get_price_per_lb_by_weight(weight_lb: Optional[float]) -> Optional[float]:
     if weight_lb is None:
         return None
-    return 6.0 if float(weight_lb) >= 1 else 6.99
+    if float(weight_lb) < 1:
+        return 6.99
+    return 6.0
 
 
 def calculate_row_total(row: ParsedRow, default_unit_price: float, default_price_per_lb: float) -> float:
     effective_weight_lb = get_effective_weight_lb(row)
 
     if effective_weight_lb is not None:
-        effective_price_per_lb = get_price_per_lb_by_weight(effective_weight_lb)
-        return round(float(effective_weight_lb) * float(effective_price_per_lb), 2)
+        if float(effective_weight_lb) < 1:
+            return 6.99
+        return round(float(effective_weight_lb) * 6.0, 2)
 
     if row.row_total is not None:
         return round(float(row.row_total), 2)
@@ -630,6 +633,9 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
     invoice_total_crc = float(invoice.get("total_crc") or 0)
     invoice_total_usd = float(invoice.get("total_usd") or 0)
 
+    if invoice_total_usd <= 0 and invoice_total_crc > 0:
+        invoice_total_usd = round(invoice_total_crc / exchange_rate, 2)
+
     if invoice_total_crc <= 0 and invoice_total_usd > 0:
         invoice_total_crc = round(invoice_total_usd * exchange_rate, 2)
 
@@ -711,7 +717,7 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
     centered("PAQUETE", table_x + guide_w / 2, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
     centered("DESCRIPCIÓN", table_x + guide_w + desc_w / 2, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
     centered("PESO LB", table_x + guide_w + desc_w + weight_w / 2, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
-    centered("PRECIO\\LB", table_x + guide_w + desc_w + weight_w + price_w / 2, table_y + 7, size=7, font="Helvetica-Bold", color=colors.white)
+    centered("PRECIO\nPOR LB", table_x + guide_w + desc_w + weight_w + price_w / 2, table_y + 7, size=7, font="Helvetica-Bold", color=colors.white)
     centered("TOTAL", table_x + guide_w + desc_w + weight_w + price_w + total_w / 2, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
 
     row_y = table_y - 18
@@ -736,11 +742,6 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
             item_total_usd = round(float(item["total_crc"]) / exchange_rate, 2)
         else:
             item_total_usd = 0.0
-
-        if item.get("total_crc") is not None:
-            item_total_crc = float(item["total_crc"])
-        else:
-            item_total_crc = round(item_total_usd * exchange_rate, 2)
 
         draw_wrapped_center(guide_text, table_x + guide_w / 2, row_y + 4, width_chars=14, line_gap=8.0, size=7)
         centered(description, table_x + guide_w + desc_w / 2, row_y, size=8, font="Helvetica")
@@ -772,7 +773,11 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
     c.setLineWidth(1)
     c.line(table_x + 100, row_y + 6, table_x + table_w - 100, row_y + 6)
 
-    monto_y = row_y - 58
+    totals_usd_y = row_y - 22
+    left("TOTAL EN DÓLARES", 110, totals_usd_y, size=12, font="Helvetica-Bold", color=colors.HexColor("#444444"))
+    right(pdf_money_usd(invoice_total_usd), page_width - 108, totals_usd_y, size=12, font="Helvetica-Bold")
+
+    monto_y = totals_usd_y - 34
     centered("MONTO POR PESO", page_width / 2 - 18, monto_y, size=16, font="Helvetica", color=colors.HexColor("#5a5a5a"))
     right(pdf_money_crc_text(invoice_total_crc), page_width - 108, monto_y, size=12, font="Helvetica")
 
