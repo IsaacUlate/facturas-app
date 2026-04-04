@@ -628,10 +628,10 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
         }]
 
     invoice_total_crc = float(invoice.get("total_crc") or 0)
+    invoice_total_usd = float(invoice.get("total_usd") or 0)
 
-    if invoice_total_crc <= 0:
-        total_usd = float(invoice.get("total_usd") or 0)
-        invoice_total_crc = round(total_usd * exchange_rate, 2)
+    if invoice_total_crc <= 0 and invoice_total_usd > 0:
+        invoice_total_crc = round(invoice_total_usd * exchange_rate, 2)
 
     def centered(text: str, x: float, y: float, size=10, font="Helvetica", color=colors.black):
         c.setFont(font, size)
@@ -692,7 +692,6 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
     left("FECHA", 400, header_y, size=8, font="Helvetica-Bold")
 
     left(customer_name[:28], 60, header_y - 28, size=10, font="Helvetica")
-    draw_wrapped_left(package_number, 205, header_y - 28, width_chars=24, line_gap=10.0, size=10)
     left(invoice_date, 400, header_y - 28, size=10, font="Helvetica")
 
     table_x = 48
@@ -731,10 +730,16 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
         weight_lb = item.get("weight_lb")
         price_per_lb = item.get("price_per_lb")
 
+        if item.get("total_usd") is not None:
+            item_total_usd = float(item["total_usd"])
+        elif item.get("total_crc") is not None:
+            item_total_usd = round(float(item["total_crc"]) / exchange_rate, 2)
+        else:
+            item_total_usd = 0.0
+
         if item.get("total_crc") is not None:
             item_total_crc = float(item["total_crc"])
         else:
-            item_total_usd = float(item.get("total_usd") or 0)
             item_total_crc = round(item_total_usd * exchange_rate, 2)
 
         draw_wrapped_center(guide_text, table_x + guide_w / 2, row_y + 4, width_chars=14, line_gap=8.0, size=7)
@@ -754,7 +759,7 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
             font="Helvetica",
         )
         centered(
-            pdf_money_crc_text(item_total_crc),
+            pdf_money_usd(item_total_usd),
             table_x + guide_w + desc_w + weight_w + price_w + total_w / 2,
             row_y,
             size=8,
