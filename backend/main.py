@@ -30,7 +30,7 @@ from unidecode import unidecode
 # =========================
 BASE_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = BASE_DIR / "assets"
-PROCESSED_INVOICES_FILE = BASE_DIR / "processed_invoices.json"
+DOWNLOADED_INVOICES_FILE = BASE_DIR / "downloaded_invoices.json"
 
 LOGO_CANDIDATES = [
     ASSETS_DIR / "arvox_logo.png",
@@ -512,82 +512,92 @@ def money_crc_text(value: float) -> str:
     return f"CRC {value:,.0f}"
 
 
-def load_processed_state() -> Dict[str, Any]:
-    if not PROCESSED_INVOICES_FILE.exists():
-        return {"processed_item_ids": []}
+# =========================
+# Descargadas JSON
+# =========================
+def load_downloaded_state() -> Dict[str, Any]:
+    if not DOWNLOADED_INVOICES_FILE.exists():
+        return {"downloaded_invoice_ids": []}
 
     try:
-        data = json.loads(PROCESSED_INVOICES_FILE.read_text(encoding="utf-8"))
+        data = json.loads(DOWNLOADED_INVOICES_FILE.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
-            return {"processed_item_ids": []}
-        if "processed_item_ids" not in data or not isinstance(data["processed_item_ids"], list):
-            data["processed_item_ids"] = []
+            return {"downloaded_invoice_ids": []}
+        if "downloaded_invoice_ids" not in data or not isinstance(data["downloaded_invoice_ids"], list):
+            data["downloaded_invoice_ids"] = []
         return data
     except Exception:
-        return {"processed_item_ids": []}
+        return {"downloaded_invoice_ids": []}
 
 
-def save_processed_state(state: Dict[str, Any]) -> None:
-    PROCESSED_INVOICES_FILE.write_text(
+def save_downloaded_state(state: Dict[str, Any]) -> None:
+    DOWNLOADED_INVOICES_FILE.write_text(
         json.dumps(state, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
 
-def build_item_identifier(customer_name: str, item: Dict[str, Any]) -> str:
+def build_invoice_identifier(invoice: Dict[str, Any]) -> str:
+    normalized_items = []
+
+    for item in invoice.get("items", []):
+        normalized_items.append(
+            {
+                "description": normalize_key(item.get("description", "")),
+                "guides": sorted(
+                    format_tracking_last_6(g) for g in item.get("guides", []) if normalize_text(g)
+                ),
+                "weight_lb": round(float(item["weight_lb"]), 3) if item.get("weight_lb") is not None else None,
+                "price_per_lb": round(float(item["price_per_lb"]), 2) if item.get("price_per_lb") is not None else None,
+                "total_usd": round(float(item["total_usd"]), 2) if item.get("total_usd") is not None else None,
+                "total_crc": round(float(item["total_crc"]), 2) if item.get("total_crc") is not None else None,
+            }
+        )
+
+    normalized_items.sort(
+        key=lambda x: (
+            x["description"],
+            ",".join(x["guides"]),
+            x["weight_lb"] if x["weight_lb"] is not None else -1,
+            x["total_usd"] if x["total_usd"] is not None else -1,
+            x["total_crc"] if x["total_crc"] is not None else -1,
+        )
+    )
+
     payload = {
-        "customer_name": normalize_customer_name(customer_name),
-        "description": normalize_key(item.get("description", "")),
-        "guides": sorted(normalize_text(g) for g in item.get("guides", []) if normalize_text(g)),
-        "weight_lb": round(float(item["weight_lb"]), 3) if item.get("weight_lb") is not None else None,
-        "total_usd": round(float(item["total_usd"]), 2) if item.get("total_usd") is not None else None,
-        "total_crc": round(float(item["total_crc"]), 2) if item.get("total_crc") is not None else None,
+        "customer_name": normalize_customer_name(invoice.get("customerName", "")),
+        "items": normalized_items,
     }
+
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def filter_invoice_new_items(invoice: Dict[str, Any], processed_item_ids: set[str]) -> Tuple[Optional[Dict[str, Any]], List[str]]:
-    customer_name = invoice.get("customerName", "Cliente")
-    original_items = invoice.get("items", [])
+def filter_not_downloaded_invoices(invoices: List[Dict[str, Any]], downloaded_ids: set[str]) -> List[Dict[str, Any]]:
+    filtered: List[Dict[str, Any]] = []
 
-    new_items: List[Dict[str, Any]] = []
-    new_ids: List[str] = []
-
-    for item in original_items:
-        item_id = build_item_identifier(customer_name, item)
-        if item_id in processed_item_ids:
+    for invoice in invoices:
+        invoice_id = build_invoice_identifier(invoice)
+        if invoice_id in downloaded_ids:
             continue
-        new_items.append(item)
-        new_ids.append(item_id)
+        filtered.append(invoice)
 
-    if not new_items:
-        return None, []
+    return filtered
 
-    unique_guides: List[str] = sorted(
-        {
-            guide
-            for item in new_items
-            for guide in item.get("guides", [])
-            if normalize_text(guide)
-        }
-    )
 
-    subtotal_crc = round(sum(float(item.get("total_crc") or 0) for item in new_items), 2)
-    subtotal_usd = round(sum(float(item.get("total_usd") or 0) for item in new_items), 2)
+def mark_invoices_as_downloaded(invoices: List[Dict[str, Any]]) -> None:
+    if not invoices:
+        return
 
-    filtered_invoice = {
-        **invoice,
-        "items": new_items,
-        "guides": unique_guides,
-        "subtotal_crc": subtotal_crc,
-        "subtotal_usd": subtotal_usd,
-        "total_crc": subtotal_crc,
-        "total_usd": subtotal_usd,
-        "itemCount": len(new_items),
-    }
+    state = load_downloaded_state()
+    downloaded_ids = set(state.get("downloaded_invoice_ids", []))
 
-    return filtered_invoice, new_ids
+    for invoice in invoices:
+        invoice_id = build_invoice_identifier(invoice)
+        downloaded_ids.add(invoice_id)
+
+    state["downloaded_invoice_ids"] = sorted(downloaded_ids)
+    save_downloaded_state(state)
 
 
 def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> bytes:
@@ -679,7 +689,6 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
 
     header_y = logo_y - 42
     left("CLIENTE", 60, header_y, size=8, font="Helvetica-Bold")
-    #left("NÚMERO DE PAQUETE", 205, header_y, size=8, font="Helvetica-Bold")
     left("FECHA", 400, header_y, size=8, font="Helvetica-Bold")
 
     left(customer_name[:28], 60, header_y - 28, size=10, font="Helvetica")
@@ -816,6 +825,10 @@ async def process_file(
     rows, invalid_rows = build_rows(raw_rows)
     invoices = build_customer_invoices(rows, default_unit_price, default_price_per_lb)
 
+    downloaded_state = load_downloaded_state()
+    downloaded_ids = set(downloaded_state.get("downloaded_invoice_ids", []))
+    invoices = filter_not_downloaded_invoices(invoices, downloaded_ids)
+
     summary = {
         "totalRows": len(rows) + len(invalid_rows),
         "validRows": len(rows),
@@ -839,20 +852,18 @@ async def generate_pdf(payload: Dict[str, Any]):
     if not invoice:
         raise HTTPException(status_code=400, detail="Falta invoice en el payload.")
 
-    state = load_processed_state()
-    processed_item_ids = set(state.get("processed_item_ids", []))
+    downloaded_state = load_downloaded_state()
+    downloaded_ids = set(downloaded_state.get("downloaded_invoice_ids", []))
+    invoice_id = build_invoice_identifier(invoice)
 
-    filtered_invoice, new_ids = filter_invoice_new_items(invoice, processed_item_ids)
-    if not filtered_invoice:
-        raise HTTPException(status_code=400, detail="Esta factura ya fue generada anteriormente.")
+    if invoice_id in downloaded_ids:
+        raise HTTPException(status_code=400, detail="Esta factura ya fue descargada anteriormente.")
 
-    pdf_bytes = create_invoice_pdf(filtered_invoice, settings)
-    filename = normalize_key(filtered_invoice.get("customerName", "cliente")).replace(" ", "_") or "factura"
+    pdf_bytes = create_invoice_pdf(invoice, settings)
+    filename = normalize_key(invoice.get("customerName", "cliente")).replace(" ", "_") or "factura"
     headers = {"Content-Disposition": f'attachment; filename="factura_{filename}.pdf"'}
 
-    processed_item_ids.update(new_ids)
-    state["processed_item_ids"] = sorted(processed_item_ids)
-    save_processed_state(state)
+    mark_invoices_as_downloaded([invoice])
 
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
@@ -865,33 +876,22 @@ async def generate_zip(payload: Dict[str, Any]):
     if not invoices:
         raise HTTPException(status_code=400, detail="No hay facturas para exportar.")
 
-    state = load_processed_state()
-    processed_item_ids = set(state.get("processed_item_ids", []))
+    downloaded_state = load_downloaded_state()
+    downloaded_ids = set(downloaded_state.get("downloaded_invoice_ids", []))
+    invoices_to_export = filter_not_downloaded_invoices(invoices, downloaded_ids)
+
+    if not invoices_to_export:
+        raise HTTPException(status_code=400, detail="No hay facturas nuevas para exportar. Todas ya fueron descargadas antes.")
 
     memory = io.BytesIO()
-    generated_any = False
-    new_processed_ids: List[str] = []
 
     with zipfile.ZipFile(memory, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for invoice in invoices:
-            filtered_invoice, new_ids = filter_invoice_new_items(invoice, processed_item_ids)
-            if not filtered_invoice:
-                continue
-
-            pdf_bytes = create_invoice_pdf(filtered_invoice, settings)
-            name = normalize_key(filtered_invoice.get("customerName", "cliente")).replace(" ", "_") or "factura"
+        for invoice in invoices_to_export:
+            pdf_bytes = create_invoice_pdf(invoice, settings)
+            name = normalize_key(invoice.get("customerName", "cliente")).replace(" ", "_") or "factura"
             zf.writestr(f"factura_{name}.pdf", pdf_bytes)
 
-            generated_any = True
-            for item_id in new_ids:
-                processed_item_ids.add(item_id)
-                new_processed_ids.append(item_id)
-
-    if not generated_any:
-        raise HTTPException(status_code=400, detail="No hay facturas nuevas para exportar. Todas ya fueron generadas antes.")
-
-    state["processed_item_ids"] = sorted(processed_item_ids)
-    save_processed_state(state)
+    mark_invoices_as_downloaded(invoices_to_export)
 
     memory.seek(0)
     headers = {"Content-Disposition": 'attachment; filename="facturas.zip"'}
