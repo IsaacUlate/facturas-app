@@ -566,7 +566,7 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
 
     header_y = logo_y - 42
     left("CLIENTE", 60, header_y, size=8, font="Helvetica-Bold")
-    left("NÚMERO DE PAQUETE", 205, header_y, size=8, font="Helvetica-Bold")
+    #left("NÚMERO DE PAQUETE", 205, header_y, size=8, font="Helvetica-Bold")
     left("FECHA", 400, header_y, size=8, font="Helvetica-Bold")
 
     left(customer_name[:28], 60, header_y - 28, size=10, font="Helvetica")
