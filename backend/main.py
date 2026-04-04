@@ -4,6 +4,7 @@ import csv
 import io
 import math
 import re
+import textwrap
 import zipfile
 from dataclasses import dataclass, asdict
 from datetime import datetime
@@ -544,6 +545,20 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
     def pdf_money_crc_text(value: float) -> str:
         return f"CRC {value:,.2f}"
 
+    def draw_wrapped_left(text: str, x: float, top_y: float, width_chars: int = 18, line_gap: float = 10.0, size: int = 10):
+        lines = textwrap.wrap(str(text), width=width_chars) or [str(text)]
+        current_y = top_y
+        for line in lines:
+            left(line, x, current_y, size=size, font="Helvetica")
+            current_y -= line_gap
+
+    def draw_wrapped_center(text: str, center_x: float, top_y: float, width_chars: int = 14, line_gap: float = 8.0, size: int = 8):
+        lines = textwrap.wrap(str(text), width=width_chars) or [str(text)]
+        current_y = top_y
+        for line in lines:
+            centered(line, center_x, current_y, size=size, font="Helvetica")
+            current_y -= line_gap
+
     c.setFillColor(colors.HexColor("#f3f3f3"))
     c.rect(0, 0, page_width, page_height, fill=1, stroke=0)
 
@@ -565,11 +580,11 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
 
     header_y = logo_y - 42
     left("CLIENTE", 60, header_y, size=8, font="Helvetica-Bold")
-    left("NÚMERO DE PAQUETE", 205, header_y, size=8, font="Helvetica-Bold")
+    #left("NÚMERO DE PAQUETE", 205, header_y, size=8, font="Helvetica-Bold")
     left("FECHA", 400, header_y, size=8, font="Helvetica-Bold")
 
     left(customer_name[:28], 60, header_y - 28, size=10, font="Helvetica")
-    left(package_number[:32], 205, header_y - 28, size=10, font="Helvetica")
+    draw_wrapped_left(package_number, 205, header_y - 28, width_chars=24, line_gap=10.0, size=10)
     left(invoice_date, 400, header_y - 28, size=10, font="Helvetica")
 
     table_x = 48
@@ -593,15 +608,13 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
     centered("TOTAL", table_x + guide_w + desc_w + weight_w + price_w + total_w / 2, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
 
     row_y = table_y - 18
-    row_gap = 16
+    row_gap = 26
     max_rows_visible = 9
 
     visible_items = items[:max_rows_visible]
 
     for item in visible_items:
         guide_text = ", ".join(item.get("guides", [])) if item.get("guides") else "N/A"
-        if len(guide_text) > 20:
-            guide_text = guide_text[:17] + "..."
 
         description = (item.get("description") or "Sin descripción").upper()
         if len(description) > 22:
@@ -616,7 +629,7 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
             item_total_usd = float(item.get("total_usd") or 0)
             item_total_crc = round(item_total_usd * exchange_rate, 2)
 
-        centered(guide_text, table_x + guide_w / 2, row_y, size=8, font="Helvetica")
+        draw_wrapped_center(guide_text, table_x + guide_w / 2, row_y + 4, width_chars=14, line_gap=8.0, size=7)
         centered(description, table_x + guide_w + desc_w / 2, row_y, size=8, font="Helvetica")
         centered(
             "" if weight_lb is None else f"{float(weight_lb):.3f}".rstrip("0").rstrip("."),
