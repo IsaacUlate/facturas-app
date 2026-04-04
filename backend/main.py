@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import math
 import re
 import textwrap
 import zipfile
+import hashlib
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -28,6 +30,7 @@ from unidecode import unidecode
 # =========================
 BASE_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = BASE_DIR / "assets"
+PROCESSED_INVOICES_FILE = BASE_DIR / "processed_invoices.json"
 
 LOGO_CANDIDATES = [
     ASSETS_DIR / "arvox_logo.png",
@@ -364,19 +367,29 @@ def build_rows(raw_rows: List[List[Any]]) -> Tuple[List[ParsedRow], List[Invalid
     return parsed_rows, invalid_rows
 
 
+def get_effective_weight_lb(row: ParsedRow) -> Optional[float]:
+    if row.weight_lb is not None:
+        return round(float(row.weight_lb), 3)
+    if row.weight_kg is not None:
+        return round(float(row.weight_kg) * 2.20462, 3)
+    return None
+
+
+def get_price_per_lb_by_weight(weight_lb: Optional[float]) -> Optional[float]:
+    if weight_lb is None:
+        return None
+    return 6.0 if float(weight_lb) >= 1 else 6.99
+
+
 def calculate_row_total(row: ParsedRow, default_unit_price: float, default_price_per_lb: float) -> float:
+    effective_weight_lb = get_effective_weight_lb(row)
+
+    if effective_weight_lb is not None:
+        effective_price_per_lb = get_price_per_lb_by_weight(effective_weight_lb)
+        return round(float(effective_weight_lb) * float(effective_price_per_lb), 2)
+
     if row.row_total is not None:
         return round(float(row.row_total), 2)
-
-    if row.weight_lb is not None and row.price_per_lb is not None:
-        return round(float(row.weight_lb) * float(row.price_per_lb), 2)
-
-    if row.weight_lb is not None and row.price_per_lb is None and default_price_per_lb > 0:
-        return round(float(row.weight_lb) * float(default_price_per_lb), 2)
-
-    if row.weight_kg is not None and default_price_per_lb > 0:
-        weight_lb = float(row.weight_kg) * 2.20462
-        return round(weight_lb * default_price_per_lb, 2)
 
     return round(float(default_unit_price), 2)
 
@@ -394,6 +407,16 @@ def get_logo_path() -> Optional[Path]:
         if path.exists():
             return path
     return None
+
+
+def format_tracking_last_6(tracking: str) -> str:
+    tracking_text = normalize_text(tracking)
+    digits = re.sub(r"\D", "", tracking_text)
+    if len(digits) >= 6:
+        return digits[-6:]
+    if len(tracking_text) >= 6:
+        return tracking_text[-6:]
+    return tracking_text or "N/A"
 
 
 def build_customer_invoices(
@@ -416,24 +439,22 @@ def build_customer_invoices(
         all_guides: List[str] = []
 
         for row in customer_rows:
-            effective_weight_lb = row.weight_lb
-            if effective_weight_lb is None and row.weight_kg is not None:
-                effective_weight_lb = round(float(row.weight_kg) * 2.20462, 3)
+            effective_weight_lb = get_effective_weight_lb(row)
+            effective_price_per_lb = get_price_per_lb_by_weight(effective_weight_lb)
 
-            effective_price_per_lb = (
-                row.price_per_lb if row.price_per_lb is not None
-                else (default_price_per_lb if default_price_per_lb > 0 else None)
-            )
-
-            if row.row_total is not None and row.row_total > 0:
+            if effective_weight_lb is not None:
+                calculated_usd = calculate_row_total(row, default_unit_price, default_price_per_lb)
+                if calculated_usd <= 0:
+                    continue
+                item_total_usd = round(float(calculated_usd), 2)
+                item_total_crc = None
+            elif row.row_total is not None and row.row_total > 0:
                 item_total_crc = round(float(row.row_total), 2)
                 item_total_usd = None
             else:
                 calculated_usd = calculate_row_total(row, default_unit_price, default_price_per_lb)
-
-                if calculated_usd is None or calculated_usd <= 0:
+                if calculated_usd <= 0:
                     continue
-
                 item_total_usd = round(float(calculated_usd), 2)
                 item_total_crc = None
 
@@ -491,6 +512,84 @@ def money_crc_text(value: float) -> str:
     return f"CRC {value:,.0f}"
 
 
+def load_processed_state() -> Dict[str, Any]:
+    if not PROCESSED_INVOICES_FILE.exists():
+        return {"processed_item_ids": []}
+
+    try:
+        data = json.loads(PROCESSED_INVOICES_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {"processed_item_ids": []}
+        if "processed_item_ids" not in data or not isinstance(data["processed_item_ids"], list):
+            data["processed_item_ids"] = []
+        return data
+    except Exception:
+        return {"processed_item_ids": []}
+
+
+def save_processed_state(state: Dict[str, Any]) -> None:
+    PROCESSED_INVOICES_FILE.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def build_item_identifier(customer_name: str, item: Dict[str, Any]) -> str:
+    payload = {
+        "customer_name": normalize_customer_name(customer_name),
+        "description": normalize_key(item.get("description", "")),
+        "guides": sorted(normalize_text(g) for g in item.get("guides", []) if normalize_text(g)),
+        "weight_lb": round(float(item["weight_lb"]), 3) if item.get("weight_lb") is not None else None,
+        "total_usd": round(float(item["total_usd"]), 2) if item.get("total_usd") is not None else None,
+        "total_crc": round(float(item["total_crc"]), 2) if item.get("total_crc") is not None else None,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def filter_invoice_new_items(invoice: Dict[str, Any], processed_item_ids: set[str]) -> Tuple[Optional[Dict[str, Any]], List[str]]:
+    customer_name = invoice.get("customerName", "Cliente")
+    original_items = invoice.get("items", [])
+
+    new_items: List[Dict[str, Any]] = []
+    new_ids: List[str] = []
+
+    for item in original_items:
+        item_id = build_item_identifier(customer_name, item)
+        if item_id in processed_item_ids:
+            continue
+        new_items.append(item)
+        new_ids.append(item_id)
+
+    if not new_items:
+        return None, []
+
+    unique_guides: List[str] = sorted(
+        {
+            guide
+            for item in new_items
+            for guide in item.get("guides", [])
+            if normalize_text(guide)
+        }
+    )
+
+    subtotal_crc = round(sum(float(item.get("total_crc") or 0) for item in new_items), 2)
+    subtotal_usd = round(sum(float(item.get("total_usd") or 0) for item in new_items), 2)
+
+    filtered_invoice = {
+        **invoice,
+        "items": new_items,
+        "guides": unique_guides,
+        "subtotal_crc": subtotal_crc,
+        "subtotal_usd": subtotal_usd,
+        "total_crc": subtotal_crc,
+        "total_usd": subtotal_usd,
+        "itemCount": len(new_items),
+    }
+
+    return filtered_invoice, new_ids
+
+
 def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> bytes:
     buffer = io.BytesIO()
     page_width, page_height = A4
@@ -502,7 +601,7 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
     footer_name = settings.get("footerText") or DEFAULT_FOOTER_NAME
 
     customer_name = invoice.get("customerName", "Cliente")
-    package_number = ", ".join(invoice.get("guides", [])) if invoice.get("guides") else "N/A"
+    package_number = ", ".join(format_tracking_last_6(g) for g in invoice.get("guides", [])) if invoice.get("guides") else "N/A"
 
     now = datetime.now()
     invoice_date = f"{now.day}/{now.month}/{now.year}"
@@ -614,7 +713,7 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
     visible_items = items[:max_rows_visible]
 
     for item in visible_items:
-        guide_text = ", ".join(item.get("guides", [])) if item.get("guides") else "N/A"
+        guide_text = ", ".join(format_tracking_last_6(g) for g in item.get("guides", [])) if item.get("guides") else "N/A"
 
         description = (item.get("description") or "Sin descripción").upper()
         if len(description) > 22:
@@ -740,9 +839,20 @@ async def generate_pdf(payload: Dict[str, Any]):
     if not invoice:
         raise HTTPException(status_code=400, detail="Falta invoice en el payload.")
 
-    pdf_bytes = create_invoice_pdf(invoice, settings)
-    filename = normalize_key(invoice.get("customerName", "cliente")).replace(" ", "_") or "factura"
+    state = load_processed_state()
+    processed_item_ids = set(state.get("processed_item_ids", []))
+
+    filtered_invoice, new_ids = filter_invoice_new_items(invoice, processed_item_ids)
+    if not filtered_invoice:
+        raise HTTPException(status_code=400, detail="Esta factura ya fue generada anteriormente.")
+
+    pdf_bytes = create_invoice_pdf(filtered_invoice, settings)
+    filename = normalize_key(filtered_invoice.get("customerName", "cliente")).replace(" ", "_") or "factura"
     headers = {"Content-Disposition": f'attachment; filename="factura_{filename}.pdf"'}
+
+    processed_item_ids.update(new_ids)
+    state["processed_item_ids"] = sorted(processed_item_ids)
+    save_processed_state(state)
 
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
@@ -755,13 +865,33 @@ async def generate_zip(payload: Dict[str, Any]):
     if not invoices:
         raise HTTPException(status_code=400, detail="No hay facturas para exportar.")
 
+    state = load_processed_state()
+    processed_item_ids = set(state.get("processed_item_ids", []))
+
     memory = io.BytesIO()
+    generated_any = False
+    new_processed_ids: List[str] = []
 
     with zipfile.ZipFile(memory, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
         for invoice in invoices:
-            pdf_bytes = create_invoice_pdf(invoice, settings)
-            name = normalize_key(invoice.get("customerName", "cliente")).replace(" ", "_") or "factura"
+            filtered_invoice, new_ids = filter_invoice_new_items(invoice, processed_item_ids)
+            if not filtered_invoice:
+                continue
+
+            pdf_bytes = create_invoice_pdf(filtered_invoice, settings)
+            name = normalize_key(filtered_invoice.get("customerName", "cliente")).replace(" ", "_") or "factura"
             zf.writestr(f"factura_{name}.pdf", pdf_bytes)
+
+            generated_any = True
+            for item_id in new_ids:
+                processed_item_ids.add(item_id)
+                new_processed_ids.append(item_id)
+
+    if not generated_any:
+        raise HTTPException(status_code=400, detail="No hay facturas nuevas para exportar. Todas ya fueron generadas antes.")
+
+    state["processed_item_ids"] = sorted(processed_item_ids)
+    save_processed_state(state)
 
     memory.seek(0)
     headers = {"Content-Disposition": 'attachment; filename="facturas.zip"'}
