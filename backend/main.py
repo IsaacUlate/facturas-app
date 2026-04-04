@@ -424,7 +424,6 @@ def build_customer_invoices(
                 else (default_price_per_lb if default_price_per_lb > 0 else None)
             )
 
-            # Si el Excel trae TOTAL, lo respetamos como total final en CRC
             if row.row_total is not None and row.row_total > 0:
                 item_total_crc = round(float(row.row_total), 2)
                 item_total_usd = None
@@ -482,6 +481,7 @@ def build_customer_invoices(
     invoices.sort(key=lambda x: x["customerName"].lower())
     return invoices
 
+
 def money_usd(value: float) -> str:
     return f"${value:,.2f}"
 
@@ -501,6 +501,7 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
     footer_name = settings.get("footerText") or DEFAULT_FOOTER_NAME
 
     customer_name = invoice.get("customerName", "Cliente")
+    package_number = ", ".join(invoice.get("guides", [])) if invoice.get("guides") else "N/A"
 
     now = datetime.now()
     invoice_date = f"{now.day}/{now.month}/{now.year}"
@@ -516,10 +517,8 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
             "guides": [],
         }]
 
-    # Si ya viene total_crc desde el Excel, usamos ese
     invoice_total_crc = float(invoice.get("total_crc") or 0)
 
-    # Si no viene total_crc, calculamos desde total_usd
     if invoice_total_crc <= 0:
         total_usd = float(invoice.get("total_usd") or 0)
         invoice_total_crc = round(total_usd * exchange_rate, 2)
@@ -539,10 +538,10 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
         c.setFillColor(color)
         c.drawRightString(x, y, str(text))
 
-    def money_usd(value: float) -> str:
+    def pdf_money_usd(value: float) -> str:
         return f"${value:,.2f}"
 
-    def money_crc_text(value: float) -> str:
+    def pdf_money_crc_text(value: float) -> str:
         return f"CRC {value:,.2f}"
 
     c.setFillColor(colors.HexColor("#f3f3f3"))
@@ -566,10 +565,11 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
 
     header_y = logo_y - 42
     left("CLIENTE", 60, header_y, size=8, font="Helvetica-Bold")
-    #left("NÚMERO DE PAQUETE", 205, header_y, size=8, font="Helvetica-Bold")
+    left("NÚMERO DE PAQUETE", 205, header_y, size=8, font="Helvetica-Bold")
     left("FECHA", 400, header_y, size=8, font="Helvetica-Bold")
 
     left(customer_name[:28], 60, header_y - 28, size=10, font="Helvetica")
+    left(package_number[:32], 205, header_y - 28, size=10, font="Helvetica")
     left(invoice_date, 400, header_y - 28, size=10, font="Helvetica")
 
     table_x = 48
@@ -589,7 +589,7 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
     centered("PAQUETE", table_x + guide_w / 2, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
     centered("DESCRIPCIÓN", table_x + guide_w + desc_w / 2, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
     centered("PESO LB", table_x + guide_w + desc_w + weight_w / 2, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
-    centered("PRECIO\LB", table_x + guide_w + desc_w + weight_w + price_w / 2, table_y + 7, size=7, font="Helvetica-Bold", color=colors.white)
+    centered("PRECIO\\LB", table_x + guide_w + desc_w + weight_w + price_w / 2, table_y + 7, size=7, font="Helvetica-Bold", color=colors.white)
     centered("TOTAL", table_x + guide_w + desc_w + weight_w + price_w + total_w / 2, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
 
     row_y = table_y - 18
@@ -626,14 +626,14 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
             font="Helvetica",
         )
         centered(
-            "" if price_per_lb is None else money_usd(float(price_per_lb)),
+            "" if price_per_lb is None else pdf_money_usd(float(price_per_lb)),
             table_x + guide_w + desc_w + weight_w + price_w / 2,
             row_y,
             size=8,
             font="Helvetica",
         )
         centered(
-            money_crc_text(item_total_crc),
+            pdf_money_crc_text(item_total_crc),
             table_x + guide_w + desc_w + weight_w + price_w + total_w / 2,
             row_y,
             size=8,
@@ -648,7 +648,7 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
 
     monto_y = row_y - 58
     centered("MONTO POR PESO", page_width / 2 - 18, monto_y, size=16, font="Helvetica", color=colors.HexColor("#5a5a5a"))
-    right(money_crc_text(invoice_total_crc), page_width - 108, monto_y, size=12, font="Helvetica")
+    right(pdf_money_crc_text(invoice_total_crc), page_width - 108, monto_y, size=12, font="Helvetica")
 
     pagar_y = monto_y - 50
     left("CANTIDAD A PAGAR", 110, pagar_y, size=16, font="Helvetica-Bold", color=colors.HexColor("#444444"))
@@ -660,7 +660,7 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
 
     c.setFillColor(accent)
     c.roundRect(total_box_x, total_box_y, total_box_w, total_box_h, 7, stroke=0, fill=1)
-    centered(money_crc_text(invoice_total_crc), total_box_x + total_box_w / 2, total_box_y + 9, size=14, font="Helvetica-Bold", color=colors.white)
+    centered(pdf_money_crc_text(invoice_total_crc), total_box_x + total_box_w / 2, total_box_y + 9, size=14, font="Helvetica-Bold", color=colors.white)
 
     logo_path = get_logo_path()
     if logo_path:
@@ -683,6 +683,7 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
     pdf_bytes = buffer.getvalue()
     buffer.close()
     return pdf_bytes
+
 
 # =========================
 # API
