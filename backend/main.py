@@ -614,7 +614,7 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
     footer_name = settings.get("footerText") or DEFAULT_FOOTER_NAME
 
     customer_name = invoice.get("customerName", "Cliente")
-    now = datetime.now()
+    now = datetime.now(tz=__import__("zoneinfo").ZoneInfo("America/Costa_Rica"))
     invoice_date = f"{now.day}/{now.month}/{now.year}"
 
     items = invoice.get("items", [])
