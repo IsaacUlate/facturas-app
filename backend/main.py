@@ -658,12 +658,9 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
     def pdf_money_crc_text(value: float) -> str:
         return f"CRC {value:,.2f}"
 
-    def draw_wrapped_center(text: str, center_x: float, top_y: float, width_chars: int = 14, line_gap: float = 8.0, size: int = 8):
-        lines = textwrap.wrap(str(text), width=width_chars) or [str(text)]
-        current_y = top_y
-        for line in lines:
-            centered(line, center_x, current_y, size=size, font="Helvetica")
-            current_y -= line_gap
+    def fit_text(text: str, max_len: int) -> str:
+        t = str(text or "")
+        return t if len(t) <= max_len else t[: max_len - 3] + "..."
 
     c.setFillColor(colors.HexColor("#f3f3f3"))
     c.rect(0, 0, page_width, page_height, fill=1, stroke=0)
@@ -683,25 +680,32 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
     centered("ARVOX", page_width / 2, logo_y + 28, size=24, font="Helvetica-Bold", color=colors.white)
     centered("COURIER", page_width / 2, logo_y + 10, size=9, font="Helvetica", color=colors.white)
 
+    # =========================
+    # Header superior
+    # =========================
     header_y = logo_y - 42
 
     table_x = 48
     table_w = page_width - 96
 
-    guide_w = 110
-    desc_w = 150
+    guide_w = 92
+    desc_w = 180
     weight_w = 58
-    price_w = 58
+    price_w = 72
     total_w = table_w - guide_w - desc_w - weight_w - price_w
 
-    left("CLIENTE", 60, header_y, size=8, font="Helvetica-Bold")
-    left(customer_name[:28], 60, header_y - 28, size=10, font="Helvetica")
-
     total_center_x = table_x + guide_w + desc_w + weight_w + price_w + total_w / 2
-    fecha_x = total_center_x - 25
-    left("FECHA", fecha_x, header_y, size=8, font="Helvetica-Bold")
-    left(invoice_date, fecha_x, header_y - 28, size=10, font="Helvetica")
 
+    left("CLIENTE", 60, header_y, size=8, font="Helvetica-Bold")
+    left(fit_text(customer_name, 28), 60, header_y - 28, size=10, font="Helvetica")
+
+    # Fecha alineada con la columna TOTAL
+    centered("FECHA", total_center_x, header_y, size=8, font="Helvetica-Bold")
+    centered(invoice_date, total_center_x, header_y - 28, size=10, font="Helvetica")
+
+    # =========================
+    # Tabla
+    # =========================
     table_y = header_y - 78
     table_h = 26
 
@@ -715,17 +719,13 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
     centered("TOTAL", total_center_x, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
 
     row_y = table_y - 18
-    row_gap = 26
+    row_gap = 22
     max_rows_visible = 9
     visible_items = items[:max_rows_visible]
 
     for item in visible_items:
         guide_text = ", ".join(format_tracking_last_6(g) for g in item.get("guides", [])) if item.get("guides") else "N/A"
-
-        description = (item.get("description") or "Sin descripción").upper()
-        if len(description) > 22:
-            description = description[:19] + "..."
-
+        description = fit_text((item.get("description") or "Sin descripción").upper(), 24)
         weight_lb = item.get("weight_lb")
         price_per_lb = item.get("price_per_lb")
 
@@ -736,7 +736,7 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
         else:
             item_total_usd = 0.0
 
-        draw_wrapped_center(guide_text, table_x + guide_w / 2, row_y + 4, width_chars=14, line_gap=8.0, size=7)
+        centered(fit_text(guide_text, 10), table_x + guide_w / 2, row_y, size=7, font="Helvetica")
         centered(description, table_x + guide_w + desc_w / 2, row_y, size=8, font="Helvetica")
         centered(
             "" if weight_lb is None else f"{float(weight_lb):.3f}".rstrip("0").rstrip("."),
@@ -762,21 +762,35 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
 
         row_y -= row_gap
 
-    divider_y = row_y + 6
+    # Línea divisoria de extremo a extremo del cuadro
+    divider_y = row_y + 8
     c.setStrokeColor(colors.black)
     c.setLineWidth(1)
     c.line(table_x, divider_y, table_x + table_w, divider_y)
 
-    totals_usd_y = divider_y - 26
-    left("TOTAL EN DÓLARES", 92, totals_usd_y, size=11, font="Helvetica-Bold", color=colors.HexColor("#444444"))
-    right(pdf_money_usd(invoice_total_usd), page_width - 86, totals_usd_y, size=12, font="Helvetica-Bold")
+    # Fila TOTAL
+    total_row_y = divider_y - 16
+    c.setFont("Helvetica-Bold", 9)
+    c.setFillColor(colors.black)
+    c.drawCentredString(table_x + guide_w / 2, total_row_y, "TOTAL")
+    c.drawCentredString(total_center_x, total_row_y, pdf_money_usd(invoice_total_usd))
 
-    monto_y = totals_usd_y - 34
-    left("MONTO POR PESO", 165, monto_y, size=15, font="Helvetica", color=colors.HexColor("#5a5a5a"))
-    right(pdf_money_crc_text(invoice_total_crc), page_width - 86, monto_y, size=12, font="Helvetica")
+    # =========================
+    # Resumen inferior alineado
+    # =========================
+    summary_left_x = 70
+    summary_right_x = page_width - 88
 
-    pagar_y = monto_y - 50
-    left("CANTIDAD A PAGAR", 84, pagar_y, size=16, font="Helvetica-Bold", color=colors.HexColor("#444444"))
+    totals_usd_y = divider_y - 44
+    left("TOTAL EN DÓLARES", summary_left_x, totals_usd_y, size=12, font="Helvetica-Bold", color=colors.HexColor("#444444"))
+    right(pdf_money_usd(invoice_total_usd), summary_right_x, totals_usd_y, size=12, font="Helvetica-Bold")
+
+    monto_y = totals_usd_y - 30
+    left("MONTO POR PESO", summary_left_x, monto_y, size=14, font="Helvetica", color=colors.HexColor("#5a5a5a"))
+    right(pdf_money_crc_text(invoice_total_crc), summary_right_x, monto_y, size=12, font="Helvetica")
+
+    pagar_y = monto_y - 42
+    left("CANTIDAD A PAGAR", summary_left_x, pagar_y, size=16, font="Helvetica-Bold", color=colors.HexColor("#444444"))
 
     total_box_w = 112
     total_box_h = 28
@@ -794,20 +808,31 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
         color=colors.white,
     )
 
+    # =========================
+    # Footer visual
+    # =========================
+    footer_y = 100
+
     logo_path = get_logo_path()
     if logo_path:
         try:
             logo_reader = ImageReader(str(logo_path))
-            c.drawImage(logo_reader, 150, 72, width=62, height=62, preserveAspectRatio=True, mask="auto")
+            c.drawImage(
+                logo_reader,
+                155,
+                footer_y - 18,
+                width=52,
+                height=52,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
         except Exception:
             pass
 
-    sinpe_x = page_width / 2 + 48
-    sinpe_y = 118
-
-    left("SINPE", sinpe_x, sinpe_y + 6, size=12, font="Helvetica-Bold")
-    left(sinpe_number, sinpe_x, sinpe_y - 18, size=12, font="Helvetica")
-    left(footer_name, sinpe_x, sinpe_y - 42, size=11, font="Helvetica")
+    sinpe_x = page_width / 2 + 45
+    left("SINPE", sinpe_x, footer_y + 12, size=12, font="Helvetica-Bold")
+    left(sinpe_number, sinpe_x, footer_y - 10, size=12, font="Helvetica")
+    left(footer_name, sinpe_x, footer_y - 32, size=11, font="Helvetica")
 
     c.showPage()
     c.save()
@@ -815,7 +840,6 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
     pdf_bytes = buffer.getvalue()
     buffer.close()
     return pdf_bytes
-
 
 # =========================
 # API
