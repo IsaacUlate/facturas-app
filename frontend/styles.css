@@ -328,43 +328,60 @@ dialog::backdrop {
 }
 
 .arvox-logo-box {
-  width: 150px;
+  width: 220px;
   background: var(--accent);
   border-radius: 14px;
   text-align: center;
   color: white;
-  padding: 8px 12px 10px;
+  padding: 10px 16px 14px;
 }
 
 .arvox-logo-main {
-  font-size: 32px;
+  font-size: 38px;
   font-weight: 800;
   line-height: 1;
 }
 
 .arvox-logo-sub {
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.14em;
-  margin-top: 4px;
+  margin-top: 6px;
 }
 
-.arvox-header-grid {
-  display: grid;
-  grid-template-columns: 1fr 1.2fr 0.8fr;
-  gap: 22px;
-  margin-bottom: 26px;
-  padding: 0 8px;
+.arvox-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  padding: 0 4px;
+}
+
+.arvox-header-right {
+  text-align: right;
+}
+
+.arvox-divider {
+  border: none;
+  border-top: 2px solid var(--accent);
+  margin: 0 0 20px;
+}
+
+.arvox-divider-light {
+  border-top: 1px solid #ccc;
+  margin-top: 4px;
 }
 
 .arvox-label {
   font-size: 11px;
-  font-weight: 800;
-  color: #111;
-  margin-bottom: 10px;
+  font-weight: 700;
+  color: #888;
+  margin-bottom: 6px;
+  text-transform: uppercase;
 }
 
 .arvox-value {
   font-size: 14px;
+  font-weight: 700;
   color: #222;
 }
 
@@ -398,23 +415,27 @@ dialog::backdrop {
   border-bottom: 1px solid #ddd;
 }
 
+.arvox-row-even {
+  background: #ebebeb;
+}
+
 .arvox-summary {
   margin-top: 18px;
 }
 
 .arvox-summary-line {
   display: flex;
-  justify-content: center;
-  gap: 30px;
+  justify-content: space-between;
   align-items: center;
-  font-size: 28px;
-  color: #5a5a5a;
-  margin-bottom: 34px;
+  font-size: 14px;
+  color: #555;
+  padding: 6px 4px;
 }
 
 .arvox-summary-line strong {
-  color: #111;
-  font-size: 20px;
+  color: #222;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .arvox-pay-row {
@@ -422,24 +443,23 @@ dialog::backdrop {
   justify-content: space-between;
   align-items: center;
   gap: 20px;
-  padding: 0 56px;
-  margin-bottom: 40px;
+  padding: 14px 4px 30px;
 }
 
 .arvox-pay-label {
-  font-size: 28px;
+  font-size: 16px;
   font-weight: 800;
-  color: #444;
+  color: #333;
 }
 
 .arvox-pay-box {
   background: var(--accent);
   color: white;
-  font-size: 22px;
+  font-size: 15px;
   font-weight: 800;
-  padding: 10px 18px;
+  padding: 10px 22px;
   border-radius: 10px;
-  min-width: 190px;
+  min-width: 180px;
   text-align: center;
 }
 
@@ -447,8 +467,7 @@ dialog::backdrop {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 48px;
-  margin-top: 80px;
+  margin-top: 40px;
 }
 
 .arvox-stamp-wrap {
@@ -493,22 +512,26 @@ dialog::backdrop {
 }
 
 .arvox-sinpe {
-  text-align: left;
+  text-align: center;
 }
 
 .arvox-sinpe-title {
-  font-size: 24px;
+  font-size: 14px;
   font-weight: 800;
-  margin-bottom: 14px;
+  margin-bottom: 8px;
+  color: #444;
 }
 
 .arvox-sinpe-number {
-  font-size: 22px;
-  margin-bottom: 10px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 6px;
 }
 
 .arvox-sinpe-name {
-  font-size: 18px;
+  font-size: 13px;
+  color: #666;
 }
 
 @media (max-width: 980px) {

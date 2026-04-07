@@ -86,6 +86,14 @@ function moneyCRC(value) {
   })}`;
 }
 
+function trackingLast6(tracking) {
+  const digits = String(tracking || '').replace(/\D/g, '');
+  if (digits.length >= 6) return digits.slice(-6);
+  const t = String(tracking || '');
+  if (t.length >= 6) return t.slice(-6);
+  return t || 'N/A';
+}
+
 function setStatus(text) {
   els.statusText.textContent = text;
 }
@@ -150,7 +158,7 @@ function renderPreviewTable() {
 
   const rows = state.invoices.flatMap(invoice =>
     invoice.items.map(item => {
-      const totalCrc = item.total_crc != null
+      const totalCrc = item.total_crc > 0
         ? Number(item.total_crc)
         : Math.round(Number(item.total_usd || 0) * settings.exchangeRate);
 
@@ -209,7 +217,7 @@ function renderInvoiceList() {
   }
 
   els.invoiceList.innerHTML = filtered.map(invoice => {
-    const totalCrc = invoice.total_crc != null
+    const totalCrc = invoice.total_crc > 0
       ? Number(invoice.total_crc)
       : Math.round(Number(invoice.total_usd || 0) * settings.exchangeRate);
 
@@ -235,14 +243,17 @@ function renderInvoiceList() {
 
 function renderInvoicePreview(invoice) {
   const settings = getSettings();
-  const totalCrc = invoice.total_crc != null
+  const totalCrc = invoice.total_crc > 0
     ? Number(invoice.total_crc)
     : Math.round(Number(invoice.total_usd || 0) * settings.exchangeRate);
+  const totalUsd = Number(invoice.total_usd || 0);
+  const today = new Date().toLocaleDateString('es-CR');
 
   els.invoicePreview.innerHTML = `
     <div class="arvox-preview" style="--accent:${settings.accentColor}">
       <div class="arvox-sheet">
         <div class="arvox-border">
+
           <div class="arvox-logo-top">
             <div class="arvox-logo-box">
               <div class="arvox-logo-main">ARVOX</div>
@@ -250,55 +261,61 @@ function renderInvoicePreview(invoice) {
             </div>
           </div>
 
-          <div class="arvox-header-grid">
+          <div class="arvox-header-row">
             <div>
               <div class="arvox-label">CLIENTE</div>
-              <div class="arvox-value">${invoice.customerName}</div>
+              <div class="arvox-value">${invoice.customerName.toUpperCase()}</div>
             </div>
-            <div>
-              <div class="arvox-label">NÚMERO DE PAQUETE</div>
-              <div class="arvox-value">${(invoice.guides || []).join(', ') || 'N/A'}</div>
-            </div>
-            <div>
+            <div class="arvox-header-right">
               <div class="arvox-label">FECHA</div>
-              <div class="arvox-value">${new Date().toLocaleDateString('es-CR')}</div>
+              <div class="arvox-value">${today}</div>
             </div>
           </div>
+
+          <div class="arvox-divider"></div>
 
           <div class="arvox-table">
             <div class="arvox-table-head arvox-row">
               <div>PAQUETE</div>
               <div>DESCRIPCIÓN</div>
               <div>PESO LB</div>
-              <div>PRECIO LB</div>
+              <div>PRECIO / LB</div>
               <div>TOTAL</div>
             </div>
 
             <div class="arvox-table-body">
-              ${invoice.items.map(item => {
-                const itemTotalCrc = item.total_crc != null
+              ${invoice.items.map((item, idx) => {
+                const itemTotalCrc = item.total_crc > 0
                   ? Number(item.total_crc)
                   : Math.round(Number(item.total_usd || 0) * settings.exchangeRate);
-
+                const guides = (item.guides || []).map(g => trackingLast6(g)).join(', ') || 'N/A';
+                const weightText = item.weight_lb != null
+                  ? Number(item.weight_lb).toFixed(3).replace(/\.?0+$/, '')
+                  : '';
                 return `
-                  <div class="arvox-row">
-                    <div>${(item.guides || []).join(', ') || 'N/A'}</div>
-                    <div>${item.description}</div>
-                    <div>${item.weight_lb ?? ''}</div>
+                  <div class="arvox-row${idx % 2 === 0 ? ' arvox-row-even' : ''}">
+                    <div>${guides}</div>
+                    <div>${(item.description || 'Sin descripción').toUpperCase()}</div>
+                    <div>${weightText}</div>
                     <div>${item.price_per_lb != null ? moneyUSD(item.price_per_lb) : ''}</div>
-                    <div>${moneyCRC(itemTotalCrc)}</div>
+                    <div><strong>${moneyCRC(itemTotalCrc)}</strong></div>
                   </div>
                 `;
               }).join('')}
             </div>
           </div>
 
+          <div class="arvox-divider arvox-divider-light"></div>
+
           <div class="arvox-summary">
             <div class="arvox-summary-line">
-              <span>MONTO POR PESO</span>
-              <strong>${moneyCRC(totalCrc)}</strong>
+              <span>TOTAL EN DÓLARES</span>
+              <strong>${moneyUSD(totalUsd)}</strong>
             </div>
-
+            <div class="arvox-summary-line">
+              <span>MONTO EN COLONES</span>
+              <span>${moneyCRC(totalCrc)}</span>
+            </div>
             <div class="arvox-pay-row">
               <span class="arvox-pay-label">CANTIDAD A PAGAR</span>
               <span class="arvox-pay-box">${moneyCRC(totalCrc)}</span>
@@ -306,22 +323,13 @@ function renderInvoicePreview(invoice) {
           </div>
 
           <div class="arvox-footer">
-            <div class="arvox-stamp-wrap">
-              <div class="arvox-stamp">
-                <div class="arvox-stamp-outer">
-                  <div class="arvox-stamp-inner">
-                    <div class="arvox-stamp-text">ARVOX COURIER</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
             <div class="arvox-sinpe">
-              <div class="arvox-sinpe-title">SINPE</div>
+              <div class="arvox-sinpe-title">SINPE MÓVIL</div>
               <div class="arvox-sinpe-number">${settings.sinpeNumber}</div>
               <div class="arvox-sinpe-name">${settings.footerText}</div>
             </div>
           </div>
+
         </div>
       </div>
     </div>
