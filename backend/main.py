@@ -633,7 +633,6 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
 
     if invoice_total_usd <= 0 and invoice_total_crc > 0:
         invoice_total_usd = round(invoice_total_crc / exchange_rate, 2)
-
     if invoice_total_crc <= 0 and invoice_total_usd > 0:
         invoice_total_crc = round(invoice_total_usd * exchange_rate, 2)
 
@@ -662,83 +661,94 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
         t = str(text or "")
         return t if len(t) <= max_len else t[: max_len - 3] + "..."
 
-    c.setFillColor(colors.HexColor("#f3f3f3"))
+    # ── Background ──
+    c.setFillColor(colors.HexColor("#f5f5f5"))
     c.rect(0, 0, page_width, page_height, fill=1, stroke=0)
 
-    margin = 26
+    # ── Accent border ──
+    bm = 24
     c.setStrokeColor(accent)
-    c.setLineWidth(10)
-    c.rect(margin, margin, page_width - margin * 2, page_height - margin * 2, stroke=1, fill=0)
+    c.setLineWidth(9)
+    c.rect(bm, bm, page_width - bm * 2, page_height - bm * 2, stroke=1, fill=0)
 
-    # =========================
-    # Logo superior
-    # =========================
-    logo_w = 150
-    logo_h = 58
+    # ── Content margins ──
+    lx = 50   # left content edge
+    rx = page_width - 50  # right content edge
+
+    # ── Logo box — centered, larger ──
+    logo_w = 220
+    logo_h = 80
     logo_x = (page_width - logo_w) / 2
-    logo_y = page_height - 118
+    logo_y = page_height - 52 - logo_h
 
     c.setFillColor(accent)
-    c.roundRect(logo_x, logo_y, logo_w, logo_h, 10, stroke=0, fill=1)
-    centered("ARVOX", page_width / 2, logo_y + 30, size=24, font="Helvetica-Bold", color=colors.white)
-    centered("COURIER", page_width / 2, logo_y + 11, size=9, font="Helvetica", color=colors.white)
+    c.roundRect(logo_x, logo_y, logo_w, logo_h, 12, stroke=0, fill=1)
+    centered("ARVOX", page_width / 2, logo_y + 48, size=32, font="Helvetica-Bold", color=colors.white)
+    centered("COURIER", page_width / 2, logo_y + 18, size=11, font="Helvetica", color=colors.white)
 
-    # =========================
-    # Layout tabla
-    # =========================
-    table_x = 42
-    table_w = page_width - 84
+    # ── Client info row ──
+    info_y = logo_y - 32
+    c.setFont("Helvetica-Bold", 8)
+    c.setFillColor(colors.HexColor("#888888"))
+    c.drawString(lx, info_y, "CLIENTE")
+    c.drawRightString(rx, info_y, "FECHA")
 
-    guide_w = 92
-    desc_w = 190
-    weight_w = 58
-    price_w = 72
-    total_w = table_w - guide_w - desc_w - weight_w - price_w
+    c.setFont("Helvetica-Bold", 11)
+    c.setFillColor(colors.black)
+    c.drawString(lx, info_y - 16, fit_text(customer_name.upper(), 34))
+    c.drawRightString(rx, info_y - 16, invoice_date)
 
-    guide_center_x = table_x + guide_w / 2
-    desc_center_x = table_x + guide_w + desc_w / 2
-    weight_center_x = table_x + guide_w + desc_w + weight_w / 2
-    price_center_x = table_x + guide_w + desc_w + weight_w + price_w / 2
-    total_center_x = table_x + guide_w + desc_w + weight_w + price_w + total_w / 2
+    # ── Accent divider ──
+    div1_y = info_y - 32
+    c.setStrokeColor(accent)
+    c.setLineWidth(1.5)
+    c.line(lx, div1_y, rx, div1_y)
 
-    # =========================
-    # Header superior
-    # =========================
-    header_y = logo_y - 42
+    # ── Table layout ──
+    table_x = lx
+    table_w = rx - lx
 
-    left("CLIENTE", 60, header_y, size=8, font="Helvetica-Bold")
-    left(fit_text(customer_name, 28), 60, header_y - 28, size=10, font="Helvetica")
+    col_guide = 88
+    col_desc  = 196
+    col_weight = 62
+    col_price  = 74
+    col_total  = table_w - col_guide - col_desc - col_weight - col_price
 
-    centered("FECHA", total_center_x, header_y, size=8, font="Helvetica-Bold")
-    centered(invoice_date, total_center_x, header_y - 28, size=10, font="Helvetica")
+    cx_g = table_x + col_guide / 2
+    cx_d = table_x + col_guide + col_desc / 2
+    cx_w = table_x + col_guide + col_desc + col_weight / 2
+    cx_p = table_x + col_guide + col_desc + col_weight + col_price / 2
+    cx_t = table_x + col_guide + col_desc + col_weight + col_price + col_total / 2
 
-    # =========================
-    # Encabezado tabla
-    # =========================
-    table_y = header_y - 78
-    table_h = 26
+    # ── Table header ──
+    th_y = div1_y - 26
+    th_h = 26
 
     c.setFillColor(accent)
-    c.roundRect(table_x, table_y, table_w, table_h, 6, stroke=0, fill=1)
+    c.roundRect(table_x, th_y, table_w, th_h, 6, stroke=0, fill=1)
 
-    centered("PAQUETE", guide_center_x, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
-    centered("DESCRIPCIÓN", desc_center_x, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
-    centered("PESO LB", weight_center_x, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
-    centered("PRECIO POR LB", price_center_x, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
-    centered("TOTAL", total_center_x, table_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
+    centered("PAQUETE",      cx_g, th_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
+    centered("DESCRIPCIÓN",  cx_d, th_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
+    centered("PESO LB",      cx_w, th_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
+    centered("PRECIO / LB",  cx_p, th_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
+    centered("TOTAL",        cx_t, th_y + 9, size=8, font="Helvetica-Bold", color=colors.white)
 
-    # =========================
-    # Filas
-    # =========================
-    row_y = table_y - 18
+    # ── Table rows ──
+    row_y = th_y - 20
     row_gap = 22
     max_rows_visible = 9
-    visible_items = items[:max_rows_visible]
 
-    for item in visible_items:
-        guide_text = ", ".join(format_tracking_last_6(g) for g in item.get("guides", [])) if item.get("guides") else "N/A"
+    for idx, item in enumerate(items[:max_rows_visible]):
+        if idx % 2 == 0:
+            c.setFillColor(colors.HexColor("#ebebeb"))
+            c.rect(table_x, row_y - 6, table_w, 20, fill=1, stroke=0)
+
+        guide_text = (
+            ", ".join(format_tracking_last_6(g) for g in item.get("guides", []))
+            if item.get("guides") else "N/A"
+        )
         description = fit_text((item.get("description") or "Sin descripción").upper(), 26)
-        weight_lb = item.get("weight_lb")
+        weight_lb   = item.get("weight_lb")
         price_per_lb = item.get("price_per_lb")
 
         if item.get("total_usd") is not None:
@@ -748,107 +758,92 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
         else:
             item_total_usd = 0.0
 
-        centered(fit_text(guide_text, 10), guide_center_x, row_y, size=7, font="Helvetica")
-        centered(description, desc_center_x, row_y, size=8, font="Helvetica")
+        centered(fit_text(guide_text, 10), cx_g, row_y, size=7, font="Helvetica")
+        centered(description, cx_d, row_y, size=8, font="Helvetica")
         centered(
             "" if weight_lb is None else f"{float(weight_lb):.3f}".rstrip("0").rstrip("."),
-            weight_center_x,
-            row_y,
-            size=8,
-            font="Helvetica",
+            cx_w, row_y, size=8, font="Helvetica",
         )
         centered(
             "" if price_per_lb is None else pdf_money_usd(float(price_per_lb)),
-            price_center_x,
-            row_y,
-            size=8,
-            font="Helvetica",
+            cx_p, row_y, size=8, font="Helvetica",
         )
-        centered(
-            pdf_money_usd(item_total_usd),
-            total_center_x,
-            row_y,
-            size=8,
-            font="Helvetica",
-        )
-
+        centered(pdf_money_usd(item_total_usd), cx_t, row_y, size=8, font="Helvetica")
         row_y -= row_gap
 
-    # =========================
-    # Línea divisoria completa
-    # =========================
-    divider_y = row_y + 8
-    c.setStrokeColor(colors.black)
-    c.setLineWidth(1)
-    c.line(table_x, divider_y, table_x + table_w, divider_y)
+    # ── Divider after rows ──
+    div2_y = row_y + 10
+    c.setStrokeColor(colors.HexColor("#bbbbbb"))
+    c.setLineWidth(0.8)
+    c.line(table_x, div2_y, table_x + table_w, div2_y)
 
-    # =========================
-    # Fila total tabla
-    # =========================
-    total_row_y = divider_y - 14
-    centered("TOTAL", guide_center_x, total_row_y, size=9, font="Helvetica-Bold")
-    centered(pdf_money_usd(invoice_total_usd), total_center_x, total_row_y, size=9, font="Helvetica-Bold")
+    # ── Total row ──
+    tr_y = div2_y - 16
+    centered("TOTAL", cx_g, tr_y, size=9, font="Helvetica-Bold")
+    centered(pdf_money_usd(invoice_total_usd), cx_t, tr_y, size=9, font="Helvetica-Bold")
 
-    # =========================
-    # Resumen inferior alineado
-    # =========================
-    summary_left_x = 64
-    summary_right_x = page_width - 62
+    # ── Summary section ──
+    sum_div_y = tr_y - 26
+    c.setStrokeColor(accent)
+    c.setLineWidth(1.5)
+    c.line(lx, sum_div_y, rx, sum_div_y)
 
-    totals_usd_y = total_row_y - 30
-    left("TOTAL EN DÓLARES", summary_left_x, totals_usd_y, size=12, font="Helvetica-Bold", color=colors.HexColor("#444444"))
-    right(pdf_money_usd(invoice_total_usd), summary_right_x, totals_usd_y, size=12, font="Helvetica-Bold")
+    label_x = lx + 8
+    val_x   = rx - 8
 
-    monto_y = totals_usd_y - 28
-    left("MONTO POR PESO", summary_left_x, monto_y, size=14, font="Helvetica", color=colors.HexColor("#5a5a5a"))
-    right(pdf_money_crc_text(invoice_total_crc), summary_right_x, monto_y, size=12, font="Helvetica")
+    usd_y = sum_div_y - 22
+    left("TOTAL EN DÓLARES", label_x, usd_y, size=11, font="Helvetica-Bold", color=colors.HexColor("#444444"))
+    right(pdf_money_usd(invoice_total_usd), val_x, usd_y, size=11, font="Helvetica-Bold")
 
-    pagar_y = monto_y - 40
-    left("CANTIDAD A PAGAR", summary_left_x, pagar_y, size=16, font="Helvetica-Bold", color=colors.HexColor("#444444"))
+    crc_y = usd_y - 22
+    left("MONTO EN COLONES", label_x, crc_y, size=10, font="Helvetica", color=colors.HexColor("#666666"))
+    right(pdf_money_crc_text(invoice_total_crc), val_x, crc_y, size=10, font="Helvetica")
 
-    total_box_w = 122
-    total_box_h = 30
-    total_box_x = page_width - 160
-    total_box_y = pagar_y - 11
+    # ── "CANTIDAD A PAGAR" with highlighted box ──
+    pay_label_y = crc_y - 36
+    left("CANTIDAD A PAGAR", label_x, pay_label_y, size=13, font="Helvetica-Bold", color=colors.HexColor("#333333"))
+
+    pay_box_w = 160
+    pay_box_h = 34
+    pay_box_x = rx - pay_box_w
+    pay_box_y = pay_label_y - 10
 
     c.setFillColor(accent)
-    c.roundRect(total_box_x, total_box_y, total_box_w, total_box_h, 7, stroke=0, fill=1)
+    c.roundRect(pay_box_x, pay_box_y, pay_box_w, pay_box_h, 8, stroke=0, fill=1)
     centered(
         pdf_money_crc_text(invoice_total_crc),
-        total_box_x + total_box_w / 2,
-        total_box_y + 10,
-        size=14,
-        font="Helvetica-Bold",
-        color=colors.white,
+        pay_box_x + pay_box_w / 2,
+        pay_box_y + 11,
+        size=13, font="Helvetica-Bold", color=colors.white,
     )
 
-    # =========================
-    # Footer
-    # =========================
-    footer_y = 78
-
+    # ── Footer ──
+    footer_mid_y = 72
     logo_path = get_logo_path()
+
     if logo_path:
         try:
-            footer_logo_w = 68
-            footer_logo_h = 68
-            footer_logo_x = page_width / 2 - 120
+            fl_w = 110
+            fl_h = 110
+            # Logo centered in the left half of the footer
+            fl_x = page_width / 2 - fl_w - 18
+            fl_y = footer_mid_y - fl_h / 2
             c.drawImage(
                 ImageReader(str(logo_path)),
-                footer_logo_x,
-                footer_y - 14,
-                width=footer_logo_w,
-                height=footer_logo_h,
+                fl_x, fl_y,
+                width=fl_w, height=fl_h,
                 preserveAspectRatio=True,
                 mask="auto",
             )
+            sinpe_cx = page_width / 2 + 60
         except Exception:
-            pass
+            sinpe_cx = page_width / 2
+    else:
+        sinpe_cx = page_width / 2
 
-    sinpe_x = page_width / 2 + 20
-    left("SINPE", sinpe_x, footer_y + 22, size=12, font="Helvetica-Bold")
-    left(sinpe_number, sinpe_x, footer_y - 1, size=12, font="Helvetica")
-    left(footer_name, sinpe_x, footer_y - 22, size=11, font="Helvetica")
+    centered("SINPE MÓVIL",  sinpe_cx, footer_mid_y + 26, size=11, font="Helvetica-Bold")
+    centered(sinpe_number,   sinpe_cx, footer_mid_y + 4,  size=13, font="Helvetica-Bold", color=accent)
+    centered(footer_name,    sinpe_cx, footer_mid_y - 18, size=10, font="Helvetica",      color=colors.HexColor("#666666"))
 
     c.showPage()
     c.save()
