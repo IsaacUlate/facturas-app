@@ -594,12 +594,19 @@ def mark_invoices_as_downloaded(invoices: List[Dict[str, Any]]) -> None:
 
     state = load_downloaded_state()
     downloaded_ids = set(state.get("downloaded_invoice_ids", []))
+    invoiced_guides = set(state.get("invoiced_guides", []))
 
     for invoice in invoices:
         invoice_id = build_invoice_identifier(invoice)
         downloaded_ids.add(invoice_id)
+        for item in invoice.get("items", []):
+            for guide in item.get("guides", []):
+                g = normalize_text(guide)
+                if g:
+                    invoiced_guides.add(g)
 
     state["downloaded_invoice_ids"] = sorted(downloaded_ids)
+    state["invoiced_guides"] = sorted(invoiced_guides)
     save_downloaded_state(state)
 
 
@@ -868,10 +875,15 @@ async def process_file(
     content = await file.read()
     raw_rows = load_rows(content, file.filename)
     rows, invalid_rows = build_rows(raw_rows)
-    invoices = build_customer_invoices(rows, default_unit_price, default_price_per_lb)
 
     downloaded_state = load_downloaded_state()
     downloaded_ids = set(downloaded_state.get("downloaded_invoice_ids", []))
+    invoiced_guides = set(downloaded_state.get("invoiced_guides", []))
+
+    # Filter out individual rows whose guide was already invoiced
+    rows = [r for r in rows if normalize_text(r.tracking_number) not in invoiced_guides]
+
+    invoices = build_customer_invoices(rows, default_unit_price, default_price_per_lb)
     invoices = filter_not_downloaded_invoices(invoices, downloaded_ids)
 
     summary = {
