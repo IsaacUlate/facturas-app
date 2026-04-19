@@ -19,6 +19,48 @@ const state = {
   currentFile: null,
 };
 
+const PAGE_SIZE = 25;
+const pages = { preview: 1, invalid: 1, history: 1, cobrados: 1 };
+
+function setBadge(key, count) {
+  const el = document.getElementById(`badge-${key}`);
+  if (el) el.textContent = count;
+}
+
+function paginationHtml(key, total) {
+  if (total <= PAGE_SIZE) return '';
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  const cur = pages[key];
+  let btns = '';
+  for (let i = 1; i <= totalPages; i++) {
+    btns += `<button class="page-btn${i === cur ? ' page-active' : ''}" data-pkey="${key}" data-pnum="${i}">${i}</button>`;
+  }
+  return `<div class="pagination">${btns}</div>`;
+}
+
+document.addEventListener('click', event => {
+  const pkey = event.target.getAttribute('data-pkey');
+  const pnum = event.target.getAttribute('data-pnum');
+  if (pkey && pnum) {
+    pages[pkey] = parseInt(pnum, 10);
+    if (pkey === 'preview')  renderPreviewTable();
+    if (pkey === 'invalid')  renderInvalidRows();
+    if (pkey === 'history')  renderDownloadedInvoices();
+    if (pkey === 'cobrados') renderCobrados();
+  }
+});
+
+document.addEventListener('click', event => {
+  const header = event.target.closest('[data-toggle]');
+  if (!header) return;
+  // Don't toggle when clicking inside inputs or buttons other than the toggle-btn
+  if (event.target.tagName === 'INPUT' || event.target.tagName === 'SELECT') return;
+  if (event.target.tagName === 'BUTTON' && !event.target.classList.contains('toggle-btn')) return;
+  const key = header.getAttribute('data-toggle');
+  const section = document.querySelector(`[data-section="${key}"]`);
+  if (section) section.classList.toggle('collapsed');
+});
+
 const els = {
   fileInput: document.getElementById('fileInput'),
   fileLabel: document.getElementById('fileLabel'),
@@ -124,31 +166,28 @@ function renderSummary() {
 }
 
 function renderInvalidRows() {
+  setBadge('invalid', state.invalidRows.length);
   if (!state.invalidRows.length) {
     els.invalidRows.innerHTML = '<div class="empty">Sin filas inválidas.</div>';
     return;
   }
+  const total = state.invalidRows.length;
+  const start = (pages.invalid - 1) * PAGE_SIZE;
+  const slice = state.invalidRows.slice(start, start + PAGE_SIZE);
 
   els.invalidRows.innerHTML = `
     <table>
-      <thead>
-        <tr>
-          <th>Fila</th>
-          <th>Razón</th>
-          <th>Datos</th>
-        </tr>
-      </thead>
+      <thead><tr><th>Fila</th><th>Razón</th><th>Datos</th></tr></thead>
       <tbody>
-        ${state.invalidRows.map(row => `
+        ${slice.map(row => `
           <tr>
             <td>${row.row_number}</td>
             <td>${row.reason}</td>
             <td>${Object.values(row.raw).filter(Boolean).join(' | ')}</td>
-          </tr>
-        `).join('')}
+          </tr>`).join('')}
       </tbody>
     </table>
-  `;
+    ${paginationHtml('invalid', total)}`;
 }
 
 function renderPreviewTable() {
@@ -176,20 +215,21 @@ function renderPreviewTable() {
     })
   );
 
+  setBadge('preview', rows.length);
+  const total = rows.length;
+  const start = (pages.preview - 1) * PAGE_SIZE;
+  const slice = rows.slice(start, start + PAGE_SIZE);
+
   els.previewTable.innerHTML = `
     <table>
       <thead>
         <tr>
-          <th>Cliente</th>
-          <th>Paquete</th>
-          <th>Descripción</th>
-          <th>Peso lb</th>
-          <th>Precio/lb</th>
-          <th>Total CRC</th>
+          <th>Cliente</th><th>Paquete</th><th>Descripción</th>
+          <th>Peso lb</th><th>Precio/lb</th><th>Total CRC</th>
         </tr>
       </thead>
       <tbody>
-        ${rows.slice(0, 200).map(row => `
+        ${slice.map(row => `
           <tr>
             <td>${row.customerName}</td>
             <td>${row.guide}</td>
@@ -197,11 +237,10 @@ function renderPreviewTable() {
             <td>${row.weightLb}</td>
             <td>${row.pricePerLb != null ? moneyUSD(row.pricePerLb) : ''}</td>
             <td>${moneyCRC(row.totalCrc)}</td>
-          </tr>
-        `).join('')}
+          </tr>`).join('')}
       </tbody>
     </table>
-  `;
+    ${paginationHtml('preview', total)}`;
 }
 
 function renderInvoiceList() {
@@ -446,17 +485,23 @@ function renderCobrados() {
   const query = (document.getElementById('cobradosSearch')?.value || '').trim().toLowerCase();
   const settings = getSettings();
 
-  const filtered = allCobrados.filter(c => {
+  const filtered = [...allCobrados].reverse().filter(c => {
     if (!query) return true;
     return (c.customerName || '').toLowerCase().includes(query)
         || (c.guide || '').toLowerCase().includes(query)
         || (c.description || '').toLowerCase().includes(query);
   });
 
+  setBadge('cobrados', allCobrados.length);
+
   if (!filtered.length) {
     el.innerHTML = '<div class="empty">No hay productos cobrados registrados.</div>';
     return;
   }
+
+  const total = filtered.length;
+  const start = (pages.cobrados - 1) * PAGE_SIZE;
+  const slice = filtered.slice(start, start + PAGE_SIZE);
 
   el.innerHTML = `
     <table>
@@ -467,7 +512,7 @@ function renderCobrados() {
         </tr>
       </thead>
       <tbody>
-        ${[...filtered].reverse().map(c => {
+        ${slice.map(c => {
           const crc = c.total_crc > 0
             ? Number(c.total_crc)
             : Math.round(Number(c.total_usd || 0) * settings.exchangeRate);
@@ -488,7 +533,8 @@ function renderCobrados() {
             </tr>`;
         }).join('')}
       </tbody>
-    </table>`;
+    </table>
+    ${paginationHtml('cobrados', total)}`;
 }
 
 async function loadDownloadedInvoices() {
@@ -504,18 +550,24 @@ async function loadDownloadedInvoices() {
 
 function renderDownloadedInvoices() {
   const query = (els.historySearchInput?.value || '').trim().toLowerCase();
-  const filtered = allDownloadedInvoices.filter(record => {
+  const filtered = [...allDownloadedInvoices].reverse().filter(record => {
     if (!query) return true;
     const guides = (record.guides || []).join(' ').toLowerCase();
     return record.customerName.toLowerCase().includes(query) || guides.includes(query);
   });
+
+  setBadge('history', allDownloadedInvoices.length);
 
   if (!filtered.length) {
     els.historyList.innerHTML = '<div class="empty">No hay facturas descargadas aún.</div>';
     return;
   }
 
-  els.historyList.innerHTML = [...filtered].reverse().map(record => {
+  const total = filtered.length;
+  const start = (pages.history - 1) * PAGE_SIZE;
+  const slice = filtered.slice(start, start + PAGE_SIZE);
+
+  els.historyList.innerHTML = slice.map(record => {
     const totalCrc = record.total_crc > 0
       ? Number(record.total_crc)
       : Math.round(Number(record.total_usd || 0) * getSettings().exchangeRate);
@@ -534,9 +586,8 @@ function renderDownloadedInvoices() {
           <button class="ghost" data-hist-preview='${JSON.stringify(record.invoice)}'>Vista previa</button>
           <button class="primary" data-hist-pdf='${JSON.stringify(record.invoice)}'>Re-descargar PDF</button>
         </div>
-      </article>
-    `;
-  }).join('');
+      </article>`;
+  }).join('') + paginationHtml('history', total);
 }
 
 async function redownloadPdf(invoice) {

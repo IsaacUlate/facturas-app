@@ -534,6 +534,84 @@ dialog::backdrop {
   color: #666;
 }
 
+/* ── Collapsible sections ── */
+.section-toggle-header {
+  cursor: pointer;
+  user-select: none;
+}
+
+.section-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.section-title-row h2 { margin: 0; }
+
+.count-badge {
+  background: var(--accent);
+  color: white;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 26px;
+  text-align: center;
+}
+
+.toggle-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 13px;
+  transition: transform 0.2s;
+}
+
+.section-body {
+  overflow: hidden;
+  margin-top: 14px;
+}
+
+.collapsible-section.collapsed .section-body {
+  display: none;
+}
+
+.collapsible-section.collapsed .toggle-btn {
+  transform: rotate(0deg);
+}
+
+.collapsible-section:not(.collapsed) .toggle-btn {
+  transform: rotate(180deg);
+}
+
+/* ── Pagination ── */
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 14px 0 4px;
+  justify-content: center;
+}
+
+.page-btn {
+  min-width: 34px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  background: #f0f0f0;
+  color: #333;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.page-btn:hover { background: #e4e4e4; }
+
+.page-btn.page-active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
 /* ── Invoice items panel ── */
 .invoice-items-panel {
   display: none;
