@@ -122,6 +122,20 @@
       </div>
       <div id="historyList" class="invoice-list"><p class="muted">Cargando historial…</p></div>
     </section>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>Productos cobrados</h2>
+        <div class="actions">
+          <input id="cobradosSearch" placeholder="Buscar por cliente, guía o descripción" />
+          <button id="refreshCobradosBtn" class="ghost">Actualizar</button>
+        </div>
+      </div>
+      <p class="muted" style="margin:0 0 14px;font-size:13px">
+        Estos productos no aparecerán en futuras facturas. Puedes desmarcalos para que vuelvan a aparecer.
+      </p>
+      <div id="cobradosList" class="table-wrap"><p class="muted">Cargando…</p></div>
+    </section>
   </div>
 
   <dialog id="invoiceDialog">

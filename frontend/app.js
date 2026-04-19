@@ -224,6 +224,27 @@ function renderInvoiceList() {
       ? Number(invoice.total_crc)
       : Math.round(Number(invoice.total_usd || 0) * settings.exchangeRate);
 
+    const itemsHtml = invoice.items.map((item, idx) => {
+      const itemCrc = item.total_crc > 0
+        ? Number(item.total_crc)
+        : Math.round(Number(item.total_usd || 0) * settings.exchangeRate);
+      const guideRaw = (item.guides || [])[0] || '';
+      const guideDisplay = trackingLast6(guideRaw) || guideRaw || 'N/A';
+      const desc = (item.description || 'Sin descripción').replace(/'/g, '&#39;');
+      return `
+        <label class="item-check-row${idx % 2 === 0 ? ' item-row-even' : ''}">
+          <input type="checkbox" class="item-cobrado-check"
+            data-guide="${guideRaw}"
+            data-customer="${invoice.customerName.replace(/"/g, '&quot;')}"
+            data-desc="${desc}"
+            data-usd="${item.total_usd || 0}"
+            data-crc="${itemCrc}" />
+          <span class="item-guide-cell">${guideDisplay}</span>
+          <span class="item-desc-cell">${item.description || 'Sin descripción'}</span>
+          <span class="item-total-cell">${moneyCRC(itemCrc)}</span>
+        </label>`;
+    }).join('');
+
     return `
       <article class="invoice-card">
         <div class="invoice-card-top">
@@ -235,12 +256,22 @@ function renderInvoiceList() {
             ${(invoice.guides || []).map(g => `<span class="tag">${g}</span>`).join('') || '<span class="tag">Sin guía</span>'}
           </div>
         </div>
+
+        <div class="invoice-items-panel" id="panel-${invoice.customerKey}">
+          <div class="items-panel-header">
+            <span class="muted" style="font-size:13px">Selecciona los productos cobrados:</span>
+            <button class="btn-cobrar ghost small" data-cobrar-key="${invoice.customerKey}">Cobrar seleccionados</button>
+          </div>
+          <div class="items-list">${itemsHtml}</div>
+        </div>
+
         <div class="invoice-actions">
           <button class="ghost" data-preview="${invoice.customerKey}">Vista previa</button>
+          <button class="ghost" data-toggle-items="${invoice.customerKey}">▼ Productos</button>
+          <button class="secondary" data-sent="${invoice.customerKey}">Marcar enviado</button>
           <button class="primary" data-pdf="${invoice.customerKey}">Descargar PDF</button>
         </div>
-      </article>
-    `;
+      </article>`;
   }).join('');
 }
 
@@ -340,6 +371,125 @@ function renderInvoicePreview(invoice) {
 }
 
 let allDownloadedInvoices = [];
+let allCobrados = [];
+
+async function markAsSent(customerKey) {
+  const invoice = state.invoices.find(i => i.customerKey === customerKey);
+  if (!invoice) return;
+
+  const res = await fetch(`${API_BASE}/api/mark-as-sent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ invoice }),
+  });
+
+  if (!res.ok) { alert('Error al marcar como enviado.'); return; }
+
+  state.invoices = state.invoices.filter(i => i.customerKey !== customerKey);
+  renderInvoiceList();
+  loadDownloadedInvoices();
+  setStatus('Factura marcada como enviada.');
+}
+
+async function markSelectedCobrado(customerKey) {
+  const panel = document.getElementById(`panel-${customerKey}`);
+  if (!panel) return;
+
+  const checked = [...panel.querySelectorAll('.item-cobrado-check:checked')];
+  if (!checked.length) { alert('Selecciona al menos un producto.'); return; }
+
+  const items = checked.map(cb => ({
+    guide: cb.dataset.guide,
+    customerName: cb.dataset.customer,
+    description: cb.dataset.desc,
+    total_usd: parseFloat(cb.dataset.usd || 0),
+    total_crc: parseFloat(cb.dataset.crc || 0),
+  }));
+
+  const res = await fetch(`${API_BASE}/api/mark-cobrado`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items }),
+  });
+
+  if (!res.ok) { alert('Error al marcar como cobrado.'); return; }
+
+  const markedGuides = new Set(items.map(i => i.guide));
+  const invoice = state.invoices.find(i => i.customerKey === customerKey);
+  if (invoice) {
+    invoice.items = invoice.items.filter(item => !markedGuides.has((item.guides || [])[0] || ''));
+    if (!invoice.items.length) {
+      state.invoices = state.invoices.filter(i => i.customerKey !== customerKey);
+    } else {
+      invoice.itemCount = invoice.items.length;
+    }
+  }
+
+  renderInvoiceList();
+  loadCobrados();
+  setStatus('Productos marcados como cobrados.');
+}
+
+async function loadCobrados() {
+  try {
+    const res = await fetch(`${API_BASE}/api/cobrados`);
+    const data = await res.json();
+    allCobrados = data.cobrados || [];
+    renderCobrados();
+  } catch {
+    document.getElementById('cobradosList').innerHTML = '<p class="muted">No se pudo cargar.</p>';
+  }
+}
+
+function renderCobrados() {
+  const el = document.getElementById('cobradosList');
+  const query = (document.getElementById('cobradosSearch')?.value || '').trim().toLowerCase();
+  const settings = getSettings();
+
+  const filtered = allCobrados.filter(c => {
+    if (!query) return true;
+    return (c.customerName || '').toLowerCase().includes(query)
+        || (c.guide || '').toLowerCase().includes(query)
+        || (c.description || '').toLowerCase().includes(query);
+  });
+
+  if (!filtered.length) {
+    el.innerHTML = '<div class="empty">No hay productos cobrados registrados.</div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>Guía</th><th>Cliente</th><th>Descripción</th>
+          <th>Fecha</th><th>Total CRC</th><th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${[...filtered].reverse().map(c => {
+          const crc = c.total_crc > 0
+            ? Number(c.total_crc)
+            : Math.round(Number(c.total_usd || 0) * settings.exchangeRate);
+          const gn = (c.guide_normalized || '').replace(/'/g, '&#39;');
+          return `
+            <tr id="cobrado-row-${gn}">
+              <td>${c.guide}</td>
+              <td class="cobrado-customer">${c.customerName}</td>
+              <td class="cobrado-desc">${c.description}</td>
+              <td>${c.date}</td>
+              <td>${moneyCRC(crc)}</td>
+              <td>
+                <div style="display:flex;gap:6px;flex-wrap:wrap">
+                  <button class="ghost small" data-edit-cobrado="${gn}">Editar</button>
+                  <button class="danger small" data-unmark-cobrado="${gn}">Desmarcar</button>
+                </div>
+              </td>
+            </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
 
 async function loadDownloadedInvoices() {
   try {
@@ -524,10 +674,16 @@ els.downloadZipBtn.addEventListener('click', downloadZip);
 els.closeDialogBtn.addEventListener('click', () => els.invoiceDialog.close());
 els.refreshHistoryBtn.addEventListener('click', loadDownloadedInvoices);
 els.historySearchInput.addEventListener('input', renderDownloadedInvoices);
+document.getElementById('cobradosSearch').addEventListener('input', renderCobrados);
+document.getElementById('refreshCobradosBtn').addEventListener('click', loadCobrados);
 
 els.invoiceList.addEventListener('click', event => {
-  const previewKey = event.target.getAttribute('data-preview');
-  const pdfKey = event.target.getAttribute('data-pdf');
+  const btn = event.target;
+  const previewKey  = btn.getAttribute('data-preview');
+  const pdfKey      = btn.getAttribute('data-pdf');
+  const sentKey     = btn.getAttribute('data-sent');
+  const toggleKey   = btn.getAttribute('data-toggle-items');
+  const cobrarKey   = btn.getAttribute('data-cobrar-key');
 
   if (previewKey) {
     const invoice = state.invoices.find(i => i.customerKey === previewKey);
@@ -535,9 +691,59 @@ els.invoiceList.addEventListener('click', event => {
     renderInvoicePreview(invoice);
     els.invoiceDialog.showModal();
   }
+  if (pdfKey)    downloadPdf(pdfKey);
+  if (sentKey)   markAsSent(sentKey);
+  if (cobrarKey) markSelectedCobrado(cobrarKey);
 
-  if (pdfKey) {
-    downloadPdf(pdfKey);
+  if (toggleKey) {
+    const panel = document.getElementById(`panel-${toggleKey}`);
+    if (!panel) return;
+    const open = panel.classList.toggle('open');
+    btn.textContent = open ? '▲ Productos' : '▼ Productos';
+  }
+});
+
+document.getElementById('cobradosList').addEventListener('click', async event => {
+  const editKey   = event.target.getAttribute('data-edit-cobrado');
+  const unmarkKey = event.target.getAttribute('data-unmark-cobrado');
+
+  if (editKey) {
+    const row = document.getElementById(`cobrado-row-${editKey}`);
+    if (!row) return;
+    const custCell = row.querySelector('.cobrado-customer');
+    const descCell = row.querySelector('.cobrado-desc');
+
+    if (event.target.textContent === 'Editar') {
+      custCell.innerHTML = `<input class="inline-edit" value="${custCell.textContent.trim()}" />`;
+      descCell.innerHTML = `<input class="inline-edit" value="${descCell.textContent.trim()}" />`;
+      event.target.textContent = 'Guardar';
+    } else {
+      const newCustomer = custCell.querySelector('input').value;
+      const newDesc     = descCell.querySelector('input').value;
+      const res = await fetch(`${API_BASE}/api/edit-cobrado`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guide_normalized: editKey, customerName: newCustomer, description: newDesc }),
+      });
+      if (res.ok) {
+        const idx = allCobrados.findIndex(c => c.guide_normalized === editKey);
+        if (idx !== -1) { allCobrados[idx].customerName = newCustomer; allCobrados[idx].description = newDesc; }
+        renderCobrados();
+      } else { alert('Error al guardar.'); }
+    }
+  }
+
+  if (unmarkKey) {
+    if (!confirm('¿Desmarcar este producto? Volverá a aparecer en futuras facturas.')) return;
+    const res = await fetch(`${API_BASE}/api/unmark-cobrado`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ guide_normalized: unmarkKey }),
+    });
+    if (res.ok) {
+      allCobrados = allCobrados.filter(c => c.guide_normalized !== unmarkKey);
+      renderCobrados();
+    } else { alert('Error al desmarcar.'); }
   }
 });
 
@@ -561,3 +767,4 @@ hydrateDefaultInputs();
 setStatus('Esperando archivo…');
 els.downloadZipBtn.disabled = true;
 loadDownloadedInvoices();
+loadCobrados();

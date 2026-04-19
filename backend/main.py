@@ -1001,3 +1001,93 @@ async def redownload_pdf(payload: Dict[str, Any]):
     headers = {"Content-Disposition": f'attachment; filename="factura_{filename}.pdf"'}
 
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+
+
+@app.post("/api/mark-as-sent")
+async def mark_as_sent(payload: Dict[str, Any]):
+    invoice = payload.get("invoice")
+    if not invoice:
+        raise HTTPException(status_code=400, detail="Falta invoice.")
+    mark_invoices_as_downloaded([invoice])
+    return {"ok": True}
+
+
+@app.post("/api/mark-cobrado")
+async def mark_cobrado_endpoint(payload: Dict[str, Any]):
+    items_to_mark = payload.get("items", [])
+    if not items_to_mark:
+        raise HTTPException(status_code=400, detail="Falta items.")
+
+    state = load_downloaded_state()
+    invoiced_guides = set(state.get("invoiced_guides", []))
+    cobrados: List[Dict[str, Any]] = state.get("cobrados", [])
+    existing_norms = {c["guide_normalized"] for c in cobrados}
+
+    now = datetime.now(tz=__import__("zoneinfo").ZoneInfo("America/Costa_Rica"))
+    date_str = f"{now.day}/{now.month}/{now.year}"
+
+    for item in items_to_mark:
+        guide = normalize_text(item.get("guide", ""))
+        guide_norm = normalize_guide(guide)
+        if not guide_norm or guide_norm in existing_norms:
+            continue
+        invoiced_guides.add(guide_norm)
+        existing_norms.add(guide_norm)
+        cobrados.append({
+            "guide": guide,
+            "guide_normalized": guide_norm,
+            "customerName": item.get("customerName", ""),
+            "description": item.get("description", ""),
+            "date": date_str,
+            "total_usd": float(item.get("total_usd") or 0),
+            "total_crc": float(item.get("total_crc") or 0),
+        })
+
+    state["invoiced_guides"] = sorted(invoiced_guides)
+    state["cobrados"] = cobrados
+    save_downloaded_state(state)
+    return {"ok": True}
+
+
+@app.post("/api/unmark-cobrado")
+async def unmark_cobrado(payload: Dict[str, Any]):
+    guide_normalized = payload.get("guide_normalized", "")
+    if not guide_normalized:
+        raise HTTPException(status_code=400, detail="Falta guide_normalized.")
+
+    state = load_downloaded_state()
+    invoiced_guides = set(state.get("invoiced_guides", []))
+    cobrados = state.get("cobrados", [])
+
+    invoiced_guides.discard(guide_normalized)
+    state["invoiced_guides"] = sorted(invoiced_guides)
+    state["cobrados"] = [c for c in cobrados if c.get("guide_normalized") != guide_normalized]
+    save_downloaded_state(state)
+    return {"ok": True}
+
+
+@app.post("/api/edit-cobrado")
+async def edit_cobrado(payload: Dict[str, Any]):
+    guide_normalized = payload.get("guide_normalized", "")
+    if not guide_normalized:
+        raise HTTPException(status_code=400, detail="Falta guide_normalized.")
+
+    state = load_downloaded_state()
+    cobrados = state.get("cobrados", [])
+    for c in cobrados:
+        if c.get("guide_normalized") == guide_normalized:
+            if "customerName" in payload:
+                c["customerName"] = normalize_text(payload["customerName"])
+            if "description" in payload:
+                c["description"] = normalize_text(payload["description"])
+            break
+
+    state["cobrados"] = cobrados
+    save_downloaded_state(state)
+    return {"ok": True}
+
+
+@app.get("/api/cobrados")
+def get_cobrados():
+    state = load_downloaded_state()
+    return {"cobrados": state.get("cobrados", [])}

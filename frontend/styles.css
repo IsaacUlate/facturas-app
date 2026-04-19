@@ -534,6 +534,70 @@ dialog::backdrop {
   color: #666;
 }
 
+/* ── Invoice items panel ── */
+.invoice-items-panel {
+  display: none;
+  margin: 10px 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.invoice-items-panel.open {
+  display: block;
+}
+
+.items-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #fafafa;
+  border-bottom: 1px solid var(--line);
+  gap: 10px;
+}
+
+.items-list {
+  padding: 4px 0;
+}
+
+.item-check-row {
+  display: grid;
+  grid-template-columns: auto 90px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.item-check-row:hover { background: #f0f0f0; }
+.item-row-even { background: #f7f7f7; }
+.item-row-even:hover { background: #eeeeee; }
+
+.item-guide-cell  { color: var(--accent); font-weight: 700; font-size: 12px; }
+.item-desc-cell   { color: #333; }
+.item-total-cell  { color: #222; font-weight: 600; text-align: right; white-space: nowrap; }
+
+/* ── Button variants ── */
+button.small { padding: 6px 10px; font-size: 12px; border-radius: 8px; }
+
+button.danger {
+  background: #fdecea;
+  color: #c0392b;
+}
+button.danger:hover { background: #f5c6c2; }
+
+/* ── Inline edit ── */
+.inline-edit {
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 13px;
+  width: 100%;
+}
+
 @media (max-width: 980px) {
   .grid-2,
   .summary-grid {
