@@ -30,7 +30,11 @@ from unidecode import unidecode
 # =========================
 BASE_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = BASE_DIR / "assets"
-DOWNLOADED_INVOICES_FILE = BASE_DIR / "downloaded_invoices.json"
+
+import os as _os
+_DATA_DIR = Path(_os.environ.get("DATA_DIR", str(BASE_DIR)))
+_DATA_DIR.mkdir(parents=True, exist_ok=True)
+DOWNLOADED_INVOICES_FILE = _DATA_DIR / "downloaded_invoices.json"
 
 LOGO_CANDIDATES = [
     ASSETS_DIR / "arvox_logo.png",
