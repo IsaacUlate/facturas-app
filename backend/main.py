@@ -121,6 +121,11 @@ def normalize_key(value: str) -> str:
     return text
 
 
+def normalize_guide(guide: Any) -> str:
+    """Strips all whitespace and lowercases for consistent guide dedup."""
+    return re.sub(r"\s+", "", str(guide or "")).lower()
+
+
 def canonical_header(value: Any) -> Optional[str]:
     key = normalize_key(value)
     if not key:
@@ -595,18 +600,38 @@ def mark_invoices_as_downloaded(invoices: List[Dict[str, Any]]) -> None:
     state = load_downloaded_state()
     downloaded_ids = set(state.get("downloaded_invoice_ids", []))
     invoiced_guides = set(state.get("invoiced_guides", []))
+    downloaded_invoices: List[Dict[str, Any]] = state.get("downloaded_invoices", [])
+    existing_ids = {r["id"] for r in downloaded_invoices}
+
+    now = datetime.now(tz=__import__("zoneinfo").ZoneInfo("America/Costa_Rica"))
+    date_str = f"{now.day}/{now.month}/{now.year}"
 
     for invoice in invoices:
         invoice_id = build_invoice_identifier(invoice)
         downloaded_ids.add(invoice_id)
+
+        all_guides: List[str] = []
         for item in invoice.get("items", []):
             for guide in item.get("guides", []):
-                g = normalize_text(guide)
+                g = normalize_guide(guide)
                 if g:
                     invoiced_guides.add(g)
+                    all_guides.append(normalize_text(guide))
+
+        if invoice_id not in existing_ids:
+            downloaded_invoices.append({
+                "id": invoice_id,
+                "customerName": invoice.get("customerName", ""),
+                "date": date_str,
+                "guides": all_guides,
+                "total_usd": invoice.get("total_usd", 0),
+                "total_crc": invoice.get("total_crc", 0),
+                "invoice": invoice,
+            })
 
     state["downloaded_invoice_ids"] = sorted(downloaded_ids)
     state["invoiced_guides"] = sorted(invoiced_guides)
+    state["downloaded_invoices"] = downloaded_invoices
     save_downloaded_state(state)
 
 
@@ -881,7 +906,7 @@ async def process_file(
     invoiced_guides = set(downloaded_state.get("invoiced_guides", []))
 
     # Filter out individual rows whose guide was already invoiced
-    rows = [r for r in rows if normalize_text(r.tracking_number) not in invoiced_guides]
+    rows = [r for r in rows if normalize_guide(r.tracking_number) not in invoiced_guides]
 
     invoices = build_customer_invoices(rows, default_unit_price, default_price_per_lb)
     invoices = filter_not_downloaded_invoices(invoices, downloaded_ids)
@@ -954,3 +979,25 @@ async def generate_zip(payload: Dict[str, Any]):
     headers = {"Content-Disposition": 'attachment; filename="facturas.zip"'}
 
     return StreamingResponse(memory, media_type="application/zip", headers=headers)
+
+
+@app.get("/api/downloaded-invoices")
+def get_downloaded_invoices():
+    state = load_downloaded_state()
+    records = state.get("downloaded_invoices", [])
+    return {"downloaded_invoices": records}
+
+
+@app.post("/api/redownload-pdf")
+async def redownload_pdf(payload: Dict[str, Any]):
+    invoice = payload.get("invoice")
+    settings = payload.get("settings", {})
+
+    if not invoice:
+        raise HTTPException(status_code=400, detail="Falta invoice en el payload.")
+
+    pdf_bytes = create_invoice_pdf(invoice, settings)
+    filename = normalize_key(invoice.get("customerName", "cliente")).replace(" ", "_") or "factura"
+    headers = {"Content-Disposition": f'attachment; filename="factura_{filename}.pdf"'}
+
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)

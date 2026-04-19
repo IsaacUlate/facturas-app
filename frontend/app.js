@@ -33,6 +33,9 @@ const els = {
   invoiceDialog: document.getElementById('invoiceDialog'),
   invoicePreview: document.getElementById('invoicePreview'),
   closeDialogBtn: document.getElementById('closeDialogBtn'),
+  historyList: document.getElementById('historyList'),
+  historySearchInput: document.getElementById('historySearchInput'),
+  refreshHistoryBtn: document.getElementById('refreshHistoryBtn'),
 
   companyName: document.getElementById('companyName'),
   sinpeNumber: document.getElementById('sinpeNumber'),
@@ -336,6 +339,77 @@ function renderInvoicePreview(invoice) {
   `;
 }
 
+let allDownloadedInvoices = [];
+
+async function loadDownloadedInvoices() {
+  try {
+    const res = await fetch(`${API_BASE}/api/downloaded-invoices`);
+    const data = await res.json();
+    allDownloadedInvoices = data.downloaded_invoices || [];
+    renderDownloadedInvoices();
+  } catch {
+    els.historyList.innerHTML = '<p class="muted">No se pudo cargar el historial.</p>';
+  }
+}
+
+function renderDownloadedInvoices() {
+  const query = (els.historySearchInput?.value || '').trim().toLowerCase();
+  const filtered = allDownloadedInvoices.filter(record => {
+    if (!query) return true;
+    const guides = (record.guides || []).join(' ').toLowerCase();
+    return record.customerName.toLowerCase().includes(query) || guides.includes(query);
+  });
+
+  if (!filtered.length) {
+    els.historyList.innerHTML = '<div class="empty">No hay facturas descargadas aún.</div>';
+    return;
+  }
+
+  els.historyList.innerHTML = [...filtered].reverse().map(record => {
+    const totalCrc = record.total_crc > 0
+      ? Number(record.total_crc)
+      : Math.round(Number(record.total_usd || 0) * getSettings().exchangeRate);
+    return `
+      <article class="invoice-card">
+        <div class="invoice-card-top">
+          <div>
+            <h3>${record.customerName}</h3>
+            <p class="muted">${record.date} · ${moneyCRC(totalCrc)}</p>
+          </div>
+          <div class="tags">
+            ${(record.guides || []).map(g => `<span class="tag">${g}</span>`).join('') || '<span class="tag">Sin guía</span>'}
+          </div>
+        </div>
+        <div class="invoice-actions">
+          <button class="ghost" data-hist-preview='${JSON.stringify(record.invoice)}'>Vista previa</button>
+          <button class="primary" data-hist-pdf='${JSON.stringify(record.invoice)}'>Re-descargar PDF</button>
+        </div>
+      </article>
+    `;
+  }).join('');
+}
+
+async function redownloadPdf(invoice) {
+  const res = await fetch(`${API_BASE}/api/redownload-pdf`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ invoice, settings: getSettings() }),
+  });
+
+  if (!res.ok) {
+    alert('No se pudo regenerar el PDF.');
+    return;
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `factura_${(invoice.customerName || 'cliente').replace(/\s+/g, '_')}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 async function processFile() {
   if (!state.currentFile) {
     alert('Selecciona un archivo primero.');
@@ -373,6 +447,7 @@ async function processFile() {
     els.downloadZipBtn.disabled = !state.invoices.length;
 
     setStatus(`Listo. ${data.summary.invoicesToGenerate} factura(s) generada(s).`);
+    loadDownloadedInvoices();
   } catch (error) {
     console.error(error);
     setStatus(error.message || 'Ocurrió un error.');
@@ -433,6 +508,7 @@ async function downloadZip() {
   a.download = 'facturas.zip';
   a.click();
   URL.revokeObjectURL(url);
+  loadDownloadedInvoices();
 }
 
 els.fileInput.addEventListener('change', event => {
@@ -446,6 +522,8 @@ els.processBtn.addEventListener('click', processFile);
 els.searchInput.addEventListener('input', renderInvoiceList);
 els.downloadZipBtn.addEventListener('click', downloadZip);
 els.closeDialogBtn.addEventListener('click', () => els.invoiceDialog.close());
+els.refreshHistoryBtn.addEventListener('click', loadDownloadedInvoices);
+els.historySearchInput.addEventListener('input', renderDownloadedInvoices);
 
 els.invoiceList.addEventListener('click', event => {
   const previewKey = event.target.getAttribute('data-preview');
@@ -463,6 +541,23 @@ els.invoiceList.addEventListener('click', event => {
   }
 });
 
+els.historyList.addEventListener('click', event => {
+  const btn = event.target.closest('[data-hist-preview],[data-hist-pdf]');
+  if (!btn) return;
+
+  const raw = btn.getAttribute('data-hist-preview') || btn.getAttribute('data-hist-pdf');
+  let invoice;
+  try { invoice = JSON.parse(raw); } catch { return; }
+
+  if (btn.hasAttribute('data-hist-preview')) {
+    renderInvoicePreview(invoice);
+    els.invoiceDialog.showModal();
+  } else {
+    redownloadPdf(invoice);
+  }
+});
+
 hydrateDefaultInputs();
 setStatus('Esperando archivo…');
 els.downloadZipBtn.disabled = true;
+loadDownloadedInvoices();
