@@ -461,6 +461,10 @@ async function markSelectedCobrado(customerKey) {
       state.invoices = state.invoices.filter(i => i.customerKey !== customerKey);
     } else {
       invoice.itemCount = invoice.items.length;
+      invoice.total_usd = Math.round(invoice.items.reduce((s, it) => s + (it.total_usd || 0), 0) * 100) / 100;
+      invoice.total_crc = Math.round(invoice.items.reduce((s, it) => s + (it.total_crc || 0), 0) * 100) / 100;
+      invoice.subtotal_usd = invoice.total_usd;
+      invoice.subtotal_crc = invoice.total_crc;
     }
   }
 
