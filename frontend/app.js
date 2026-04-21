@@ -589,6 +589,7 @@ function renderDownloadedInvoices() {
         <div class="invoice-actions">
           <button class="ghost" data-hist-preview='${JSON.stringify(record.invoice)}'>Vista previa</button>
           <button class="primary" data-hist-pdf='${JSON.stringify(record.invoice)}'>Re-descargar PDF</button>
+          <button class="danger small" data-hist-remove="${record.id}">Quitar del historial</button>
         </div>
       </article>`;
   }).join('') + paginationHtml('history', total);
@@ -802,9 +803,26 @@ document.getElementById('cobradosList').addEventListener('click', async event =>
   }
 });
 
-els.historyList.addEventListener('click', event => {
-  const btn = event.target.closest('[data-hist-preview],[data-hist-pdf]');
+els.historyList.addEventListener('click', async event => {
+  const btn = event.target.closest('[data-hist-preview],[data-hist-pdf],[data-hist-remove]');
   if (!btn) return;
+
+  if (btn.hasAttribute('data-hist-remove')) {
+    const invoiceId = btn.getAttribute('data-hist-remove');
+    if (!confirm('¿Quitar esta factura del historial? Podrá generarse de nuevo en la próxima carga.')) return;
+    const res = await fetch(`${API_BASE}/api/remove-downloaded`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ invoice_id: invoiceId }),
+    });
+    if (res.ok) {
+      allDownloadedInvoices = allDownloadedInvoices.filter(r => r.id !== invoiceId);
+      renderDownloadedInvoices();
+    } else {
+      alert('Error al quitar la factura.');
+    }
+    return;
+  }
 
   const raw = btn.getAttribute('data-hist-preview') || btn.getAttribute('data-hist-pdf');
   let invoice;

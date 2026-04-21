@@ -1007,6 +1007,30 @@ async def redownload_pdf(payload: Dict[str, Any]):
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
 
+@app.post("/api/remove-downloaded")
+async def remove_downloaded(payload: Dict[str, Any]):
+    invoice_id = payload.get("invoice_id", "")
+    if not invoice_id:
+        raise HTTPException(status_code=400, detail="Falta invoice_id.")
+
+    state = load_downloaded_state()
+    downloaded_ids = set(state.get("downloaded_invoice_ids", []))
+    invoiced_guides = set(state.get("invoiced_guides", []))
+    downloaded_invoices: List[Dict[str, Any]] = state.get("downloaded_invoices", [])
+
+    record = next((r for r in downloaded_invoices if r.get("id") == invoice_id), None)
+    if record:
+        for guide in record.get("guides", []):
+            invoiced_guides.discard(normalize_guide(guide))
+
+    downloaded_ids.discard(invoice_id)
+    state["downloaded_invoice_ids"] = sorted(downloaded_ids)
+    state["invoiced_guides"] = sorted(invoiced_guides)
+    state["downloaded_invoices"] = [r for r in downloaded_invoices if r.get("id") != invoice_id]
+    save_downloaded_state(state)
+    return {"ok": True}
+
+
 @app.post("/api/mark-as-sent")
 async def mark_as_sent(payload: Dict[str, Any]):
     invoice = payload.get("invoice")
