@@ -116,6 +116,41 @@ function getSettings() {
   };
 }
 
+// Recalcula el precio/lb y el total en USD de un ítem usando el precio por libra
+// configurado en pantalla, para que la vista previa se actualice al instante sin
+// tener que volver a procesar el archivo.
+function itemHasWeight(item) {
+  return item.weight_lb != null && item.weight_lb !== '' && !Number.isNaN(Number(item.weight_lb));
+}
+
+function effectivePricePerLb(item, settings) {
+  if (itemHasWeight(item)) return settings.defaultPricePerLb;
+  return item.price_per_lb;
+}
+
+function effectiveItemUsd(item, settings) {
+  if (itemHasWeight(item)) {
+    const billableWeight = Math.max(Number(item.weight_lb), 1);
+    return Math.round(billableWeight * settings.defaultPricePerLb * 100) / 100;
+  }
+  return Number(item.total_usd || 0);
+}
+
+function effectiveItemCrc(item, settings) {
+  if (item.total_crc > 0 && !itemHasWeight(item)) return Number(item.total_crc);
+  return Math.round(effectiveItemUsd(item, settings) * settings.exchangeRate);
+}
+
+function effectiveInvoiceUsd(invoice, settings) {
+  return Math.round(
+    invoice.items.reduce((sum, it) => sum + effectiveItemUsd(it, settings), 0) * 100
+  ) / 100;
+}
+
+function effectiveInvoiceCrc(invoice, settings) {
+  return invoice.items.reduce((sum, it) => sum + effectiveItemCrc(it, settings), 0);
+}
+
 function moneyUSD(value) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -199,20 +234,14 @@ function renderPreviewTable() {
   const settings = getSettings();
 
   const rows = state.invoices.flatMap(invoice =>
-    invoice.items.map(item => {
-      const totalCrc = item.total_crc > 0
-        ? Number(item.total_crc)
-        : Math.round(Number(item.total_usd || 0) * settings.exchangeRate);
-
-      return {
-        customerName: invoice.customerName,
-        guide: (item.guides || []).join(', ') || 'N/A',
-        description: item.description,
-        weightLb: item.weight_lb ?? '',
-        pricePerLb: item.price_per_lb,
-        totalCrc,
-      };
-    })
+    invoice.items.map(item => ({
+      customerName: invoice.customerName,
+      guide: (item.guides || []).join(', ') || 'N/A',
+      description: item.description,
+      weightLb: item.weight_lb ?? '',
+      pricePerLb: effectivePricePerLb(item, settings),
+      totalCrc: effectiveItemCrc(item, settings),
+    }))
   );
 
   setBadge('preview', rows.length);
@@ -259,14 +288,10 @@ function renderInvoiceList() {
   }
 
   els.invoiceList.innerHTML = filtered.map(invoice => {
-    const totalCrc = invoice.total_crc > 0
-      ? Number(invoice.total_crc)
-      : Math.round(Number(invoice.total_usd || 0) * settings.exchangeRate);
+    const totalCrc = effectiveInvoiceCrc(invoice, settings);
 
     const itemsHtml = invoice.items.map((item, idx) => {
-      const itemCrc = item.total_crc > 0
-        ? Number(item.total_crc)
-        : Math.round(Number(item.total_usd || 0) * settings.exchangeRate);
+      const itemCrc = effectiveItemCrc(item, settings);
       const guideRaw = (item.guides || [])[0] || '';
       const guideDisplay = trackingLast6(guideRaw) || guideRaw || 'N/A';
       const desc = (item.description || 'Sin descripción').replace(/'/g, '&#39;');
@@ -276,7 +301,7 @@ function renderInvoiceList() {
             data-guide="${guideRaw}"
             data-customer="${invoice.customerName.replace(/"/g, '&quot;')}"
             data-desc="${desc}"
-            data-usd="${item.total_usd || 0}"
+            data-usd="${effectiveItemUsd(item, settings)}"
             data-crc="${itemCrc}" />
           <span class="item-guide-cell">${guideDisplay}</span>
           <span class="item-desc-cell">${item.description || 'Sin descripción'}</span>
@@ -316,10 +341,8 @@ function renderInvoiceList() {
 
 function renderInvoicePreview(invoice) {
   const settings = getSettings();
-  const totalCrc = invoice.total_crc > 0
-    ? Number(invoice.total_crc)
-    : Math.round(Number(invoice.total_usd || 0) * settings.exchangeRate);
-  const totalUsd = Number(invoice.total_usd || 0);
+  const totalCrc = effectiveInvoiceCrc(invoice, settings);
+  const totalUsd = effectiveInvoiceUsd(invoice, settings);
   const today = new Date().toLocaleDateString('es-CR');
 
   els.invoicePreview.innerHTML = `
@@ -358,9 +381,8 @@ function renderInvoicePreview(invoice) {
 
             <div class="arvox-table-body">
               ${invoice.items.map((item, idx) => {
-                const itemTotalCrc = item.total_crc > 0
-                  ? Number(item.total_crc)
-                  : Math.round(Number(item.total_usd || 0) * settings.exchangeRate);
+                const itemTotalCrc = effectiveItemCrc(item, settings);
+                const itemPricePerLb = effectivePricePerLb(item, settings);
                 const guides = (item.guides || []).map(g => trackingLast6(g)).join(', ') || 'N/A';
                 const weightText = item.weight_lb != null
                   ? Number(item.weight_lb).toFixed(3).replace(/\.?0+$/, '')
@@ -370,7 +392,7 @@ function renderInvoicePreview(invoice) {
                     <div>${guides}</div>
                     <div>${(item.description || 'Sin descripción').toUpperCase()}</div>
                     <div>${weightText}</div>
-                    <div>${item.price_per_lb != null ? moneyUSD(item.price_per_lb) : ''}</div>
+                    <div>${itemPricePerLb != null ? moneyUSD(itemPricePerLb) : ''}</div>
                     <div><strong>${moneyCRC(itemTotalCrc)}</strong></div>
                   </div>
                 `;
@@ -726,6 +748,17 @@ els.fileInput.addEventListener('change', event => {
 
 els.processBtn.addEventListener('click', processFile);
 els.searchInput.addEventListener('input', renderInvoiceList);
+
+// Cambiar el precio por libra o el tipo de cambio actualiza al instante las
+// facturas y la vista previa sin tener que volver a procesar el archivo.
+function rerenderInvoiceViews() {
+  if (!state.invoices.length) return;
+  renderPreviewTable();
+  renderInvoiceList();
+}
+els.defaultPricePerLb?.addEventListener('input', rerenderInvoiceViews);
+els.exchangeRate?.addEventListener('input', rerenderInvoiceViews);
+els.defaultUnitPrice?.addEventListener('input', rerenderInvoiceViews);
 els.downloadZipBtn.addEventListener('click', downloadZip);
 els.closeDialogBtn.addEventListener('click', () => els.invoiceDialog.close());
 els.refreshHistoryBtn.addEventListener('click', loadDownloadedInvoices);

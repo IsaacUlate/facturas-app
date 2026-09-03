@@ -384,21 +384,19 @@ def get_effective_weight_lb(row: ParsedRow) -> Optional[float]:
     return None
 
 
-def get_price_per_lb_by_weight(weight_lb: Optional[float]) -> Optional[float]:
+def get_price_per_lb_by_weight(weight_lb: Optional[float], default_price_per_lb: float) -> Optional[float]:
     if weight_lb is None:
         return None
-    if float(weight_lb) < 1:
-        return 6.99
-    return 6.0
+    return round(float(default_price_per_lb), 2)
 
 
 def calculate_row_total(row: ParsedRow, default_unit_price: float, default_price_per_lb: float) -> float:
     effective_weight_lb = get_effective_weight_lb(row)
 
     if effective_weight_lb is not None:
-        if float(effective_weight_lb) < 1:
-            return 6.99
-        return round(float(effective_weight_lb) * 6.0, 2)
+        # Se cobra un mínimo de 1 lb al precio por libra configurado.
+        billable_weight_lb = max(float(effective_weight_lb), 1.0)
+        return round(billable_weight_lb * float(default_price_per_lb), 2)
 
     if row.row_total is not None:
         return round(float(row.row_total), 2)
@@ -452,7 +450,7 @@ def build_customer_invoices(
 
         for row in customer_rows:
             effective_weight_lb = get_effective_weight_lb(row)
-            effective_price_per_lb = get_price_per_lb_by_weight(effective_weight_lb)
+            effective_price_per_lb = get_price_per_lb_by_weight(effective_weight_lb, default_price_per_lb)
 
             if effective_weight_lb is not None:
                 calculated_usd = calculate_row_total(row, default_unit_price, default_price_per_lb)
@@ -639,7 +637,54 @@ def mark_invoices_as_downloaded(invoices: List[Dict[str, Any]]) -> None:
     save_downloaded_state(state)
 
 
+def get_setting_price_per_lb(settings: Dict[str, Any]) -> float:
+    """Precio por libra configurado en pantalla; 6.0 si no llega uno válido."""
+    try:
+        value = float(settings.get("defaultPricePerLb"))
+    except (TypeError, ValueError):
+        value = 0.0
+    return value if value > 0 else 6.0
+
+
+def recalculate_item_pricing(item: Dict[str, Any], default_price_per_lb: float) -> Dict[str, Any]:
+    """Si el ítem tiene peso, recalcula precio/lb y total en USD con la tarifa actual
+    (mínimo 1 lb). Los ítems sin peso (cobrados por total en colones) no se tocan."""
+    weight_lb = item.get("weight_lb")
+    if weight_lb is None:
+        return item
+    try:
+        w = float(weight_lb)
+    except (TypeError, ValueError):
+        return item
+
+    billable_weight_lb = max(w, 1.0)
+    updated = dict(item)
+    updated["price_per_lb"] = round(float(default_price_per_lb), 2)
+    updated["total_usd"] = round(billable_weight_lb * float(default_price_per_lb), 2)
+    updated["total_crc"] = None
+    return updated
+
+
+def recalculate_invoice_pricing(invoice: Dict[str, Any], settings: Dict[str, Any]) -> Dict[str, Any]:
+    default_price_per_lb = get_setting_price_per_lb(settings)
+    updated = dict(invoice)
+    updated["items"] = [
+        recalculate_item_pricing(it, default_price_per_lb)
+        for it in invoice.get("items", [])
+    ]
+
+    subtotal_usd = round(sum(float(it.get("total_usd") or 0) for it in updated["items"]), 2)
+    subtotal_crc = round(sum(float(it.get("total_crc") or 0) for it in updated["items"]), 2)
+    updated["subtotal_usd"] = subtotal_usd
+    updated["subtotal_crc"] = subtotal_crc
+    updated["total_usd"] = subtotal_usd
+    updated["total_crc"] = subtotal_crc
+    return updated
+
+
 def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> bytes:
+    invoice = recalculate_invoice_pricing(invoice, settings)
+
     buffer = io.BytesIO()
     page_width, page_height = A4
     c = canvas.Canvas(buffer, pagesize=A4)
@@ -664,13 +709,21 @@ def create_invoice_pdf(invoice: Dict[str, Any], settings: Dict[str, Any]) -> byt
             "guides": [],
         }]
 
-    invoice_total_crc = float(invoice.get("total_crc") or 0)
-    invoice_total_usd = float(invoice.get("total_usd") or 0)
-
-    if invoice_total_usd <= 0 and invoice_total_crc > 0:
-        invoice_total_usd = round(invoice_total_crc / exchange_rate, 2)
-    if invoice_total_crc <= 0 and invoice_total_usd > 0:
-        invoice_total_crc = round(invoice_total_usd * exchange_rate, 2)
+    # Totales calculados ítem por ítem, convirtiendo lo que haga falta con el tipo
+    # de cambio para que USD y CRC cuadren aunque la factura mezcle ambos.
+    invoice_total_usd = 0.0
+    invoice_total_crc = 0.0
+    for it in items:
+        if it.get("total_usd") is not None:
+            usd = float(it["total_usd"])
+            invoice_total_usd += usd
+            invoice_total_crc += usd * exchange_rate
+        elif it.get("total_crc") is not None:
+            crc = float(it["total_crc"])
+            invoice_total_crc += crc
+            invoice_total_usd += crc / exchange_rate
+    invoice_total_usd = round(invoice_total_usd, 2)
+    invoice_total_crc = round(invoice_total_crc, 2)
 
     def centered(text: str, x: float, y: float, size=10, font="Helvetica", color=colors.black):
         c.setFont(font, size)
@@ -901,6 +954,10 @@ async def process_file(
     default_unit_price: float = Form(0.0),
     default_price_per_lb: float = Form(0.0),
 ):
+    # Si no llega un precio por libra válido, se usa 6.0 como antes.
+    if not default_price_per_lb or default_price_per_lb <= 0:
+        default_price_per_lb = 6.0
+
     content = await file.read()
     raw_rows = load_rows(content, file.filename)
     rows, invalid_rows = build_rows(raw_rows)
@@ -938,6 +995,9 @@ async def generate_pdf(payload: Dict[str, Any]):
     if not invoice:
         raise HTTPException(status_code=400, detail="Falta invoice en el payload.")
 
+    # Aplica el precio por libra actual antes de generar el PDF y de guardar el historial.
+    invoice = recalculate_invoice_pricing(invoice, settings)
+
     downloaded_state = load_downloaded_state()
     downloaded_ids = set(downloaded_state.get("downloaded_invoice_ids", []))
     invoice_id = build_invoice_identifier(invoice)
@@ -961,6 +1021,9 @@ async def generate_zip(payload: Dict[str, Any]):
 
     if not invoices:
         raise HTTPException(status_code=400, detail="No hay facturas para exportar.")
+
+    # Aplica el precio por libra actual a todas las facturas antes de exportar.
+    invoices = [recalculate_invoice_pricing(inv, settings) for inv in invoices]
 
     downloaded_state = load_downloaded_state()
     downloaded_ids = set(downloaded_state.get("downloaded_invoice_ids", []))
@@ -999,6 +1062,8 @@ async def redownload_pdf(payload: Dict[str, Any]):
 
     if not invoice:
         raise HTTPException(status_code=400, detail="Falta invoice en el payload.")
+
+    invoice = recalculate_invoice_pricing(invoice, settings)
 
     pdf_bytes = create_invoice_pdf(invoice, settings)
     filename = normalize_key(invoice.get("customerName", "cliente")).replace(" ", "_") or "factura"
