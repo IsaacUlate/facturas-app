@@ -88,7 +88,26 @@ const els = {
   includeMiamiCode: document.getElementById('includeMiamiCode'),
   exchangeRate: document.getElementById('exchangeRate'),
   defaultPricePerLb: document.getElementById('defaultPricePerLb'),
+  pplCustom: document.getElementById('pplCustom'),
 };
+
+// Selector de precio por libra: $6 por defecto, $5.49, o un monto personalizado.
+// El input oculto #defaultPricePerLb es la única fuente de verdad que lee getSettings().
+function syncPricePerLb() {
+  const mode = document.querySelector('input[name="pplMode"]:checked')?.value || '6';
+  if (els.pplCustom) els.pplCustom.disabled = mode !== 'custom';
+
+  let price;
+  if (mode === 'custom') {
+    price = parseFloat(els.pplCustom?.value);
+    if (!price || price <= 0) price = ARVOX_DEFAULTS.defaultPricePerLb;
+  } else {
+    price = parseFloat(mode);
+  }
+
+  els.defaultPricePerLb.value = String(price);
+  if (typeof rerenderInvoiceViews === 'function') rerenderInvoiceViews();
+}
 
 function hydrateDefaultInputs() {
   if (els.companyName && !els.companyName.value) els.companyName.value = ARVOX_DEFAULTS.companyName;
@@ -756,7 +775,10 @@ function rerenderInvoiceViews() {
   renderPreviewTable();
   renderInvoiceList();
 }
-els.defaultPricePerLb?.addEventListener('input', rerenderInvoiceViews);
+document.querySelectorAll('input[name="pplMode"]').forEach(radio =>
+  radio.addEventListener('change', syncPricePerLb)
+);
+els.pplCustom?.addEventListener('input', syncPricePerLb);
 els.exchangeRate?.addEventListener('input', rerenderInvoiceViews);
 els.defaultUnitPrice?.addEventListener('input', rerenderInvoiceViews);
 els.downloadZipBtn.addEventListener('click', downloadZip);
@@ -870,6 +892,7 @@ els.historyList.addEventListener('click', async event => {
 });
 
 hydrateDefaultInputs();
+syncPricePerLb();
 setStatus('Esperando archivo…');
 els.downloadZipBtn.disabled = true;
 loadDownloadedInvoices();
