@@ -132,6 +132,10 @@ function getSettings() {
     footerText: els.footerText?.value?.trim() || ARVOX_DEFAULTS.footerText,
     includeMiamiCode: !!els.includeMiamiCode?.checked,
     exchangeRate: parseFloat(els.exchangeRate?.value || String(ARVOX_DEFAULTS.exchangeRate)),
+    // Peso mínimo facturable: 1 lb normalmente; 0 con la tarifa de $5.49
+    // (se multiplica el peso real aunque sea menor a una libra).
+    minBillableWeightLb:
+      document.querySelector('input[name="pplMode"]:checked')?.value === '5.49' ? 0 : 1,
   };
 }
 
@@ -149,7 +153,8 @@ function effectivePricePerLb(item, settings) {
 
 function effectiveItemUsd(item, settings) {
   if (itemHasWeight(item)) {
-    const billableWeight = Math.max(Number(item.weight_lb), 1);
+    const minWeight = settings.minBillableWeightLb ?? 1;
+    const billableWeight = Math.max(Number(item.weight_lb), minWeight);
     return Math.round(billableWeight * settings.defaultPricePerLb * 100) / 100;
   }
   return Number(item.total_usd || 0);
@@ -668,6 +673,7 @@ async function processFile() {
   formData.append('file', state.currentFile);
   formData.append('default_unit_price', String(settings.defaultUnitPrice));
   formData.append('default_price_per_lb', String(settings.defaultPricePerLb));
+  formData.append('min_billable_weight_lb', String(settings.minBillableWeightLb));
 
   setStatus('Procesando archivo…');
   els.processBtn.disabled = true;

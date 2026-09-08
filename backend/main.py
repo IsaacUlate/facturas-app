@@ -390,12 +390,18 @@ def get_price_per_lb_by_weight(weight_lb: Optional[float], default_price_per_lb:
     return round(float(default_price_per_lb), 2)
 
 
-def calculate_row_total(row: ParsedRow, default_unit_price: float, default_price_per_lb: float) -> float:
+def calculate_row_total(
+    row: ParsedRow,
+    default_unit_price: float,
+    default_price_per_lb: float,
+    min_billable_weight_lb: float = 1.0,
+) -> float:
     effective_weight_lb = get_effective_weight_lb(row)
 
     if effective_weight_lb is not None:
-        # Se cobra un mínimo de 1 lb al precio por libra configurado.
-        billable_weight_lb = max(float(effective_weight_lb), 1.0)
+        # Peso mínimo facturable: normalmente 1 lb; con la tarifa de $5.49 es 0
+        # (se multiplica el peso real aunque sea menor a una libra).
+        billable_weight_lb = max(float(effective_weight_lb), float(min_billable_weight_lb))
         return round(billable_weight_lb * float(default_price_per_lb), 2)
 
     if row.row_total is not None:
@@ -433,6 +439,7 @@ def build_customer_invoices(
     rows: List[ParsedRow],
     default_unit_price: float,
     default_price_per_lb: float,
+    min_billable_weight_lb: float = 1.0,
 ) -> List[Dict[str, Any]]:
     grouped: Dict[str, List[ParsedRow]] = {}
 
@@ -453,7 +460,9 @@ def build_customer_invoices(
             effective_price_per_lb = get_price_per_lb_by_weight(effective_weight_lb, default_price_per_lb)
 
             if effective_weight_lb is not None:
-                calculated_usd = calculate_row_total(row, default_unit_price, default_price_per_lb)
+                calculated_usd = calculate_row_total(
+                    row, default_unit_price, default_price_per_lb, min_billable_weight_lb
+                )
                 if calculated_usd <= 0:
                     continue
                 item_total_usd = round(float(calculated_usd), 2)
@@ -462,7 +471,9 @@ def build_customer_invoices(
                 item_total_crc = round(float(row.row_total), 2)
                 item_total_usd = None
             else:
-                calculated_usd = calculate_row_total(row, default_unit_price, default_price_per_lb)
+                calculated_usd = calculate_row_total(
+                    row, default_unit_price, default_price_per_lb, min_billable_weight_lb
+                )
                 if calculated_usd <= 0:
                     continue
                 item_total_usd = round(float(calculated_usd), 2)
@@ -646,9 +657,23 @@ def get_setting_price_per_lb(settings: Dict[str, Any]) -> float:
     return value if value > 0 else 6.0
 
 
-def recalculate_item_pricing(item: Dict[str, Any], default_price_per_lb: float) -> Dict[str, Any]:
-    """Si el ítem tiene peso, recalcula precio/lb y total en USD con la tarifa actual
-    (mínimo 1 lb). Los ítems sin peso (cobrados por total en colones) no se tocan."""
+def get_setting_min_billable_weight(settings: Dict[str, Any]) -> float:
+    """Peso mínimo facturable. 1.0 por defecto; 0 cuando la tarifa es $5.49
+    (se multiplica el peso real aunque sea menor a una libra)."""
+    try:
+        value = float(settings.get("minBillableWeightLb"))
+    except (TypeError, ValueError):
+        return 1.0
+    return value if value >= 0 else 1.0
+
+
+def recalculate_item_pricing(
+    item: Dict[str, Any],
+    default_price_per_lb: float,
+    min_billable_weight_lb: float = 1.0,
+) -> Dict[str, Any]:
+    """Si el ítem tiene peso, recalcula precio/lb y total en USD con la tarifa actual.
+    Los ítems sin peso (cobrados por total en colones) no se tocan."""
     weight_lb = item.get("weight_lb")
     if weight_lb is None:
         return item
@@ -657,7 +682,7 @@ def recalculate_item_pricing(item: Dict[str, Any], default_price_per_lb: float) 
     except (TypeError, ValueError):
         return item
 
-    billable_weight_lb = max(w, 1.0)
+    billable_weight_lb = max(w, float(min_billable_weight_lb))
     updated = dict(item)
     updated["price_per_lb"] = round(float(default_price_per_lb), 2)
     updated["total_usd"] = round(billable_weight_lb * float(default_price_per_lb), 2)
@@ -667,9 +692,10 @@ def recalculate_item_pricing(item: Dict[str, Any], default_price_per_lb: float) 
 
 def recalculate_invoice_pricing(invoice: Dict[str, Any], settings: Dict[str, Any]) -> Dict[str, Any]:
     default_price_per_lb = get_setting_price_per_lb(settings)
+    min_billable_weight_lb = get_setting_min_billable_weight(settings)
     updated = dict(invoice)
     updated["items"] = [
-        recalculate_item_pricing(it, default_price_per_lb)
+        recalculate_item_pricing(it, default_price_per_lb, min_billable_weight_lb)
         for it in invoice.get("items", [])
     ]
 
@@ -953,10 +979,15 @@ async def process_file(
     file: UploadFile = File(...),
     default_unit_price: float = Form(0.0),
     default_price_per_lb: float = Form(0.0),
+    min_billable_weight_lb: float = Form(1.0),
 ):
     # Si no llega un precio por libra válido, se usa 6.0 como antes.
     if not default_price_per_lb or default_price_per_lb <= 0:
         default_price_per_lb = 6.0
+
+    # Peso mínimo facturable: 1 lb por defecto, 0 para la tarifa de $5.49.
+    if min_billable_weight_lb is None or min_billable_weight_lb < 0:
+        min_billable_weight_lb = 1.0
 
     content = await file.read()
     raw_rows = load_rows(content, file.filename)
@@ -969,7 +1000,9 @@ async def process_file(
     # Filter out individual rows whose guide was already invoiced
     rows = [r for r in rows if normalize_guide(r.tracking_number) not in invoiced_guides]
 
-    invoices = build_customer_invoices(rows, default_unit_price, default_price_per_lb)
+    invoices = build_customer_invoices(
+        rows, default_unit_price, default_price_per_lb, min_billable_weight_lb
+    )
     invoices = filter_not_downloaded_invoices(invoices, downloaded_ids)
 
     summary = {
